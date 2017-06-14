@@ -114,11 +114,21 @@ def get_delta_for_para(key):
 
 def get_bound_for_para(key):
     if key.endswith('r0'):
-        bound = (2, 5)
+        if key.startswith('c'):
+            bound = (3, 5)
+        elif key.startswith('h'):
+            bound = (2, 4)
+        else:
+            bound = (2, 5)
     elif key.endswith('e0'):
-        bound = (0.005, 0.2)
+        if key.startswith('c'):
+            bound = (0.02, 0.12)
+        elif key.startswith('h'):
+            bound = (0.005, 0.1)
+        else:
+            bound = (0.005, 0.12)
     elif key.endswith('bi'):
-        bound = (-0.5, 0.5)
+        bound = (-0.2, 0)
     else:
         raise Exception('Unknown parameter: ' + key)
 

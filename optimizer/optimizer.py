@@ -1,5 +1,6 @@
 import os
 import time
+import shutil
 import json
 from collections import OrderedDict
 
@@ -46,6 +47,8 @@ class Optimizer():
             for k, v in params.items():
                 paras[k] = v.value
             ppf.set_lj_para(paras)
+
+            shutil.copy(ppf_file, ppf_file + '.bak-%i' % self.iteration)
             ppf.write(ppf_file)
 
             for target in self.db.session.query(Target).all():
@@ -90,12 +93,17 @@ class Optimizer():
             txt = '\nITERATION: %i\n' % self.iteration
             txt += '\nPARAMETERS:\n'
             for k, v in params.items():
-                txt += '%10.5f %s\n' % (v.value, k)
+                txt += '%10.5f  %s\n' % (v.value, k)
             txt += '\nRESIDUE:\n'
             for i, r in enumerate(R):
-                name_prop = targets[i // 2].name
-                name_prop += ' density' if i % 2 == 0 else ' hvap'
-                txt += '%8.2f %s\n' % (r, name_prop)
+                target = targets[i // 2]
+                if i % 2 == 0:
+                    prop = 'dens'
+                    weight = target.wDensity
+                else:
+                    prop = 'hvap'
+                    weight = target.wHvap
+                txt += '%8.2f  %s %s %.2f %8.2f\n' % (r, target.name, prop, weight, r / weight)
             txt += '\nRSQ: %.2f\n' % np.sum(list(map(lambda x: x ** 2, R)))
 
             print(txt)
@@ -141,14 +149,14 @@ class Optimizer():
             ### write Jacobian to log
             txt = '\nJACOBIAN MATRIX:\n'
             for k in params.keys():
-                txt += '%9s' % k
+                txt += '%10s' % k
             txt += '\n'
             for i, row in enumerate(J):
-                name_prop = targets[i // 2].name
-                name_prop += ' density' if i % 2 == 0 else ' hvap'
+                name = targets[i // 2].name
+                prop = 'dens' if i % 2 == 0 else 'hvap'
                 for item in row:
-                    txt += '%9.2f' % item
-                txt += ' %s\n' % name_prop
+                    txt += '%10.2f' % item
+                txt += '  %s %s\n' % (name, prop)
 
             print(txt)
             with open(LOG, 'a') as log:
