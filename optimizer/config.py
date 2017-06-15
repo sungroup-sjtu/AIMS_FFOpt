@@ -28,9 +28,24 @@ class ClusterConfig(BaseConfig):
     NPROC_PER_JOB = 8
 
 
+class PiConfig(BaseConfig):
+    DFF_ROOT = '/lustre/home/nishsun/gongzheng/apps/dff'
+    PACKMOL_BIN = '/lustre/home/nishsun/software/tools/packmol'
+    GMX_BIN = '/lustre/home/nishsun/software/gromacs/5.1.4-msdserver/bin/gmx'
+
+    MS_TOOLS_DIR = '/lustre/home/nishsun/gongzheng/workspace/msd-server'
+    WORK_DIR = '/lustre/home/nishsun/gongzheng/workspace/MSDServer'
+
+    JOB_MANAGER = 'slurm'
+    JOB_QUEUE = 'cpu'
+    NPROC_PER_JOB = 8
+
+
 Config = ClusterConfig
 if socket.gethostname() == 'cluster.hpc.org':
     Config = ClusterConfig
+elif socket.gethostname() == 'mu06.pi.sjtu.edu.cn':
+    Config = PiConfig
 elif socket.gethostname() == 'z-Mac.local':
     Config = MacConfig
 else:

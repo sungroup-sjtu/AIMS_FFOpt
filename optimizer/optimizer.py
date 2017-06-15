@@ -187,6 +187,12 @@ class Optimizer():
             target.run_npt(ppf_file)
 
     def plot(self, ppfs):
+        try:
+            import pylab
+        except:
+            print('matplotlib not found. will not plot.')
+            return
+
         ppfs = [ppf[:-4] for ppf in ppfs]
         props = dict()
         for target in self.db.session.query(Target).all():
@@ -208,7 +214,6 @@ class Optimizer():
                 props[target.name]['h_sim'][ppf].append(hvap)
 
         os.chdir(self.CWD)
-        import pylab
         pylab.rcParams.update({'font.size': 12})
         for tid, prop in props.items():
             pylab.figure(figsize=(6, 8))
