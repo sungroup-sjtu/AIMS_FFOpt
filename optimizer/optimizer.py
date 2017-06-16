@@ -25,7 +25,7 @@ class Optimizer():
         target = self.db.session.query(Target).first()
         return target.iteration
 
-    def optimize_npt(self, ppf_file):
+    def optimize(self, ppf_file):
         LOG = os.path.join(self.CWD, 'Opt-%s.log' % os.path.basename(ppf_file)[:-4])
 
         def residual(params: Parameters):
@@ -186,7 +186,7 @@ class Optimizer():
         for target in self.db.session.query(Target).all():
             target.run_npt(ppf_file)
 
-    def plot(self, ppfs):
+    def plot(self, ppfs, iteration=None):
         try:
             import pylab
         except:
@@ -208,7 +208,7 @@ class Optimizer():
                     props[target.name]['d_sim'][ppf] = []
                     props[target.name]['h_sim'][ppf] = []
 
-                density, hvap = target.get_npt_result(ppf)
+                density, hvap = target.get_npt_result(ppf, iteration)
 
                 props[target.name]['d_sim'][ppf].append(density)
                 props[target.name]['h_sim'][ppf].append(hvap)

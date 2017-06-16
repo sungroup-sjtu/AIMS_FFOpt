@@ -7,6 +7,7 @@ from collections import OrderedDict
 
 import pybel
 import panedr
+from pandas import Series
 from sqlalchemy import Column, Integer, Text, Float, String
 
 from functools import partial
@@ -98,7 +99,7 @@ class Target(Base):
         cd_or_create_and_cd(self.dir_child)
 
         commands = npt.prepare(model_dir='..', T=self.T, P=self.P, jobname='NPT-%s-%i' % (self.name, self.T),
-                               dt=0.002, nst_eq=int(2E5), nst_run=int(2E5), nst_trr=250, nst_xtc=250)
+                               dt=0.002, nst_eq=int(3E5), nst_run=int(2E5), nst_trr=250, nst_xtc=250)
 
         nprocs = simulation.jobmanager.nprocs
 
@@ -107,58 +108,60 @@ class Target(Base):
             for k in paras_diff.keys():
                 msd_out = '_tmp.msd'
                 ppf_out = '_tmp.ppf'
-                top_out = 'diff-%s.top' % k
-                top_out_hvap = 'diff-%s-hvap.top' % k
+                for i in [-1, 1]:
+                    basename = 'diff-%s.%i' % (k, i)
+                    top_out = basename + '.top'
+                    top_out_hvap = basename + '-hvap.top'
 
-                paras = copy.copy(paras_diff)
-                paras[k] += get_delta_for_para(k)
-                ppf = PPF(ppf_file)
-                ppf.set_lj_para(paras)
-                ppf.write(ppf_out)
+                    paras = copy.copy(paras_diff)
+                    paras[k] += get_delta_for_para(k) * i
+                    ppf = PPF(ppf_file)
+                    ppf.set_lj_para(paras)
+                    ppf.write(ppf_out)
 
-                shutil.copy('../../init.msd', msd_out)
-                simulation.dff.set_charge([msd_out], ppf_out)
-                simulation.dff.export_gmx(msd_out, ppf_out, gro_out='_tmp.gro', top_out=top_out)
+                    shutil.copy('../../init.msd', msd_out)
+                    simulation.dff.set_charge([msd_out], ppf_out)
+                    simulation.dff.export_gmx(msd_out, ppf_out, gro_out='_tmp.gro', top_out=top_out)
 
-                simulation.gmx.prepare_mdp_from_template('t_npt.mdp', mdp_out='diff.mdp', nstxtcout=0)
-                cmd = simulation.gmx.grompp(mdp='diff.mdp', top=top_out, tpr_out='diff-%s.tpr' % k, get_cmd=True)
-                commands.append(cmd)
-                cmd = simulation.gmx.mdrun(name='diff-%s' % k, nprocs=nprocs, rerun='npt.trr', get_cmd=True)
-                commands.append(cmd)
+                    simulation.gmx.prepare_mdp_from_template('t_npt.mdp', mdp_out='diff.mdp', nstxtcout=0)
+                    cmd = simulation.gmx.grompp(mdp='diff.mdp', top=top_out, tpr_out=basename + '.tpr', get_cmd=True)
+                    commands.append(cmd)
+                    cmd = simulation.gmx.mdrun(name=basename, nprocs=nprocs, rerun='npt.trr', get_cmd=True)
+                    commands.append(cmd)
 
-                simulation.gmx.generate_top_for_hvap(top_out, top_out_hvap)
+                    simulation.gmx.generate_top_for_hvap(top_out, top_out_hvap)
 
-                cmd = simulation.gmx.grompp(mdp='diff.mdp', top=top_out_hvap, tpr_out='diff-%s-hvap.tpr' % k,
-                                            get_cmd=True)
-                commands.append(cmd)
-                cmd = simulation.gmx.mdrun(name='diff-%s-hvap' % k, nprocs=nprocs, rerun='npt.trr', get_cmd=True)
-                commands.append(cmd)
-
-            cmd = simulation.gmx.grompp(mdp='diff.mdp', top='topol.top', tpr_out='diff.tpr', get_cmd=True)
-            commands.append(cmd)
-            cmd = simulation.gmx.mdrun(name='diff', nprocs=nprocs, rerun='npt.trr', get_cmd=True)
-            commands.append(cmd)
-            cmd = simulation.gmx.grompp(mdp='diff.mdp', top='topol-hvap.top', tpr_out='diff-hvap.tpr', get_cmd=True)
-            commands.append(cmd)
-            cmd = simulation.gmx.mdrun(name='diff-hvap', nprocs=nprocs, rerun='npt.trr', get_cmd=True)
-            commands.append(cmd)
+                    cmd = simulation.gmx.grompp(mdp='diff.mdp', top=top_out_hvap, tpr_out=basename + '-hvap.tpr',
+                                                get_cmd=True)
+                    commands.append(cmd)
+                    cmd = simulation.gmx.mdrun(name=basename + '-hvap', nprocs=nprocs, rerun='npt.trr', get_cmd=True)
+                    commands.append(cmd)
 
         commands.append('touch _finished_')
-        npt.jobmanager.generate_sh(os.getcwd(), commands, name='NPT-%s-%i' % (self.name, self.T))
+        npt.jobmanager.generate_sh(os.getcwd(), commands, name='NPT-%s-%i-%i' % (self.name, self.T, self.iteration))
         npt.run()
 
-    def get_npt_result(self, subdir) -> (float, float):
+    def get_npt_result(self, subdir, iteration=None) -> (float, float):
+        if iteration is None:
+            iteration = self.iteration
         os.chdir(self.dir_base_npt)
         os.chdir(subdir)
-        os.chdir(self.dir_child)
+        os.chdir('%i-%i-%i' % (self.T, self.P, iteration))
         print(os.getcwd())
-        density = simulation.gmx.get_property('npt.edr', 'Density')
-        density /= 1000
-        ei = simulation.gmx.get_property('hvap.edr', 'Potential')
-        hvap = 8.314 * self.T / 1000 - ei / self.n_mol
+
+        df = panedr.edr_to_df('npt.edr')
+        density = df.Density.mean() / 1000
+        df = panedr.edr_to_df('hvap.edr')
+        hvap = 8.314 * self.T / 1000 - df.Potential.mean() / self.n_mol
         return density, hvap
 
     def get_dDens_dHvap_from_paras(self, ppf_file, paras: OrderedDict):
+        # read density and Hvap series
+        df = panedr.edr_to_df('npt.edr')
+        self.dens_series_npt: Series = df.Density
+        df = panedr.edr_to_df('hvap.edr')
+        self.hvap_series_npt: Series = 8.314 * self.T / 1000 - df.Potential / self.n_mol
+
         dDens = []
         dHvap = []
         for k in paras.keys():
@@ -174,33 +177,34 @@ class Target(Base):
         os.chdir(self.dir_child)
 
         # energy and Hvap after diff
-        df = panedr.edr_to_df('diff-%s.edr' % k)
-        pene_series_diff = df.Potential
+        df = panedr.edr_to_df('diff-%s.1.edr' % k)
+        pene_series_diff_p = df.Potential
 
-        df = panedr.edr_to_df('diff-%s-hvap.edr' % k)
-        eint_series_diff = df.Potential
-        hvap_series_diff = 8.314 * self.T / 1000 - eint_series_diff / self.n_mol
+        df = panedr.edr_to_df('diff-%s.1-hvap.edr' % k)
+        hvap_series_diff_p = 8.314 * self.T / 1000 - df.Potential / self.n_mol
 
-        # density, energy and Hvap
-        df = panedr.edr_to_df('diff.edr')
-        dens_series = df.Density.loc[pene_series_diff.index]
-        pene_series = df.Potential.loc[pene_series_diff.index]
+        df = panedr.edr_to_df('diff-%s.-1.edr' % k)
+        pene_series_diff_n = df.Potential
 
-        df = panedr.edr_to_df('diff-hvap.edr')
-        eint_series = df.Potential.loc[pene_series_diff.index]
-        hvap_series = 8.314 * self.T / 1000 - eint_series / self.n_mol
+        df = panedr.edr_to_df('diff-%s.-1-hvap.edr' % k)
+        hvap_series_diff_n = 8.314 * self.T / 1000 - df.Potential / self.n_mol
 
-        # calculate the derivative
+        # calculate the derivative series dA/dp
         delta = get_delta_for_para(k)
-        dPene_series = (pene_series_diff - pene_series) / delta
-        dHvap_series = (hvap_series_diff - hvap_series) / delta
+        dPene_series: Series = (pene_series_diff_p - pene_series_diff_n) / delta / 2
+        dHvap_series: Series = (hvap_series_diff_p - hvap_series_diff_n) / delta / 2
 
-        dens_dPene = dens_series * dPene_series
-        hvap_dPene = hvap_series * dPene_series
+        # extract out the required density and hvap
+        dens_series = self.dens_series_npt.loc[dPene_series.index]
+        hvap_series = self.hvap_series_npt.loc[dPene_series.index]
 
-        dDdP = -1 / 8.314 / self.T * (dens_dPene.mean() - dens_series.mean() * dPene_series.mean())
-        dHdP = dHvap_series.mean() - 1 / 8.314 / self.T * (hvap_dPene.mean() - hvap_series.mean() * dPene_series.mean())
-        return dDdP, dHdP
+        # calculate the derivative dA/dp according to ForceBalance
+        densXdPene = dens_series * dPene_series
+        hvapXdPene = hvap_series * dPene_series
+
+        dDdp = -1 / 8.314 / self.T * (densXdPene.mean() - dens_series.mean() * dPene_series.mean())
+        dHdp = dHvap_series.mean() - 1 / 8.314 / self.T * (hvapXdPene.mean() - hvap_series.mean() * dPene_series.mean())
+        return dDdp, dHdp
 
     def npt_finished(self, ppf_file) -> bool:
         subdir = os.path.basename(ppf_file)[:-4]

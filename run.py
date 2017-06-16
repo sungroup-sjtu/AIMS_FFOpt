@@ -5,7 +5,6 @@ import os
 import sys
 from optimizer import Optimizer
 
-
 if __name__ == '__main__':
     optimizer = Optimizer(db_file='ffoptimizer.db')
 
@@ -15,7 +14,7 @@ if __name__ == '__main__':
 
     elif cmd == 'optimize':
         ppf_file = os.path.abspath(sys.argv[2])
-        params_out = optimizer.optimize_npt(ppf_file)
+        optimizer.optimize(ppf_file)
 
     elif cmd == 'npt':
         ppf_file = os.path.abspath(sys.argv[2])
@@ -23,7 +22,7 @@ if __name__ == '__main__':
 
     elif cmd == 'plot':
         ppfs = sys.argv[2:]
-        optimizer.plot(ppfs)
+        optimizer.plot(ppfs, iteration=None)
 
     else:
         print('Unknown command')
