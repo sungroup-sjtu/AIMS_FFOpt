@@ -29,11 +29,11 @@ from mstools.jobmanager import Local, Torque, Slurm
 from mstools.simulation.gmx import GmxSimulation, Npt
 
 if Config.JOB_MANAGER == 'local':
-    jobmanager = Local()
+    jobmanager = Local(nprocs=Config.NPROC_PER_JOB)
 elif Config.JOB_MANAGER == 'torque':
-    jobmanager = Torque(queue=Config.JOB_QUEUE, nprocs=Config.NPROC_PER_JOB)
+    jobmanager = Torque(queue_dict=Config.QUEUE_DICT)
 elif Config.JOB_MANAGER == 'slurm':
-    jobmanager = Slurm(queue=Config.JOB_QUEUE, nprocs=Config.NPROC_PER_JOB)
+    jobmanager = Slurm(queue_dict=Config.QUEUE_DICT)
 else:
     raise Exception('Job manager not supported')
 
