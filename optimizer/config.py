@@ -23,7 +23,7 @@ class ClusterConfig():
     WORK_DIR = '/share/workspace/msdserver/MSDServer/'
 
     JOB_MANAGER = 'torque'
-    QUEUE_DICT = OrderedDict([('cpu', 16), ('fast', 12)])
+    QUEUE_DICT = OrderedDict([('cpu', 8), ('fast', 12)])
 
 
 class PiConfig():

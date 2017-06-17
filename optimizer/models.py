@@ -26,7 +26,7 @@ sys.path.append(Config.MS_TOOLS_DIR)
 
 from mstools.utils import create_mol_from_smiles, cd_or_create_and_cd
 from mstools.jobmanager import Local, Torque, Slurm
-from mstools.simulation.gmx import GmxSimulation, Npt
+from mstools.simulation.gmx import Npt
 
 if Config.JOB_MANAGER == 'local':
     jobmanager = Local(nprocs=Config.NPROC_PER_JOB)
@@ -39,7 +39,6 @@ else:
 
 kwargs = {'packmol_bin': Config.PACKMOL_BIN, 'dff_root': Config.DFF_ROOT,
           'gmx_bin': Config.GMX_BIN, 'jobmanager': jobmanager}
-simulation = GmxSimulation(**kwargs)
 npt = Npt(**kwargs)
 
 
@@ -86,23 +85,23 @@ class Target(Base):
             length = (10 / 6.022 * mass / (self.density - 0.1)) ** (1 / 3)  # assume cubic box
 
             print('Build coordinates using Packmol: %s molecules ...' % self.n_mol)
-            simulation.packmol.build_box([pdb], [self.n_mol], 'init.pdb', length=length - 2, tolerance=1.7, silent=True)
+            npt.packmol.build_box([pdb], [self.n_mol], 'init.pdb', length=length - 2, tolerance=1.7, silent=True)
 
             print('Create box using DFF ...')
-            simulation.dff.build_box_after_packmol([mol2], [self.n_mol], 'init.msd', mol_corr='init.pdb', length=length)
+            npt.dff.build_box_after_packmol([mol2], [self.n_mol], 'init.msd', mol_corr='init.pdb', length=length)
 
         cd_or_create_and_cd(os.path.basename('%s' % ppf_file)[:-4])
 
-        simulation.msd = '../init.msd'
-        simulation.export(ppf=ppf_file, minimize=True)
+        npt.msd = '../init.msd'
+        npt.export(ppf=ppf_file, minimize=True)
 
         cd_or_create_and_cd(self.dir_child)
 
+        npt.jobmanager.refresh_preferred_queue()
         commands = npt.prepare(model_dir='..', T=self.T, P=self.P, jobname='NPT-%s-%i' % (self.name, self.T),
                                dt=0.002, nst_eq=int(3E5), nst_run=int(2E5), nst_trr=250, nst_xtc=250)
 
-        nprocs = simulation.jobmanager.nprocs
-
+        nprocs = npt.jobmanager.nprocs
         if paras_diff is not None:
             commands.append('export GMX_MAXCONSTRWARN=-1')
             for k in paras_diff.keys():
@@ -120,21 +119,20 @@ class Target(Base):
                     ppf.write(ppf_out)
 
                     shutil.copy('../../init.msd', msd_out)
-                    simulation.dff.set_charge([msd_out], ppf_out)
-                    simulation.dff.export_gmx(msd_out, ppf_out, gro_out='_tmp.gro', top_out=top_out)
+                    npt.dff.set_charge([msd_out], ppf_out)
+                    npt.dff.export_gmx(msd_out, ppf_out, gro_out='_tmp.gro', top_out=top_out)
 
-                    simulation.gmx.prepare_mdp_from_template('t_npt.mdp', mdp_out='diff.mdp', nstxtcout=0)
-                    cmd = simulation.gmx.grompp(mdp='diff.mdp', top=top_out, tpr_out=basename + '.tpr', get_cmd=True)
+                    npt.gmx.prepare_mdp_from_template('t_npt.mdp', mdp_out='diff.mdp', nstxtcout=0)
+                    cmd = npt.gmx.grompp(mdp='diff.mdp', top=top_out, tpr_out=basename + '.tpr', get_cmd=True)
                     commands.append(cmd)
-                    cmd = simulation.gmx.mdrun(name=basename, nprocs=nprocs, rerun='npt.trr', get_cmd=True)
+                    cmd = npt.gmx.mdrun(name=basename, nprocs=nprocs, rerun='npt.trr', get_cmd=True)
                     commands.append(cmd)
 
-                    simulation.gmx.generate_top_for_hvap(top_out, top_out_hvap)
+                    npt.gmx.generate_top_for_hvap(top_out, top_out_hvap)
 
-                    cmd = simulation.gmx.grompp(mdp='diff.mdp', top=top_out_hvap, tpr_out=basename + '-hvap.tpr',
-                                                get_cmd=True)
+                    cmd = npt.gmx.grompp(mdp='diff.mdp', top=top_out_hvap, tpr_out=basename + '-hvap.tpr', get_cmd=True)
                     commands.append(cmd)
-                    cmd = simulation.gmx.mdrun(name=basename + '-hvap', nprocs=nprocs, rerun='npt.trr', get_cmd=True)
+                    cmd = npt.gmx.mdrun(name=basename + '-hvap', nprocs=nprocs, rerun='npt.trr', get_cmd=True)
                     commands.append(cmd)
 
         commands.append('touch _finished_')
