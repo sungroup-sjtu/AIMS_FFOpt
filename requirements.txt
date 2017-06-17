@@ -1,0 +1,5 @@
+panedr
+lmfit
+sqlalchemy
+numpy
+openbabel

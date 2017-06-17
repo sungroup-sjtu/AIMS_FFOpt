@@ -25,7 +25,7 @@ class Optimizer():
         target = self.db.session.query(Target).first()
         return target.iteration
 
-    def optimize(self, ppf_file):
+    def optimize(self, ppf_file, wExpansivity):
         LOG = os.path.join(self.CWD, 'Opt-%s.log' % os.path.basename(ppf_file)[:-4])
 
         def residual(params: Parameters):
@@ -73,12 +73,24 @@ class Optimizer():
                     print(current_time + ' Job still running. Wait ...')
                     time.sleep(60)
 
-            R = []
+            R_dens = []
+            R_hvap = []
+            R_expa = []
             targets = self.db.session.query(Target).all()
             for target in targets:
                 dens, hvap = target.get_npt_result(os.path.basename(ppf_file)[:-4])
-                R.append((dens - target.density) / target.density * 100 * target.wDensity)  # deviation  percent
-                R.append((hvap - target.hvap) / target.hvap * 100 * target.wHvap)  # deviation percent
+                R_dens.append((dens - target.density) / target.density * 100 * target.wDensity)  # deviation  percent
+                R_hvap.append((hvap - target.hvap) / target.hvap * 100 * target.wHvap)  # deviation percent
+
+            ### thermal expansion
+            for i_mol in range(len(targets)//2):
+                target_T1 = targets[2*i_mol]
+                target_T2 = targets[2*i_mol + 1]
+                res_Kt = ((target_T1.sim_dens - target_T2.sim_dens) / (target_T1.density - target_T2.density) -1) \
+                        * 100 * wExpansivity
+                R_expa.append(res_Kt)
+
+            R = R_dens + R_hvap +R_expa
 
             ### save result to database
             if result is None:
@@ -95,15 +107,22 @@ class Optimizer():
             for k, v in params.items():
                 txt += '%10.5f  %s\n' % (v.value, k)
             txt += '\nRESIDUE:\n'
-            for i, r in enumerate(R):
-                target = targets[i // 2]
-                if i % 2 == 0:
-                    prop = 'dens'
-                    weight = target.wDensity
-                else:
-                    prop = 'hvap'
-                    weight = target.wHvap
-                txt += '%8.2f  %s %s %.2f %8.2f\n' % (r, target.name, prop, weight, r / weight)
+            for i, r in enumerate(R_dens):
+                target = targets[i]
+                prop = 'density'
+                weight = target.wDensity
+                txt += '%8.2f  %10s %10s %.2f %8.2f\n' % (r, prop, target.name, weight, r / weight)
+            for i, r in enumerate(R_hvap):
+                target = targets[i]
+                prop = 'hvap'
+                weight = target.wHvap
+                txt += '%8.2f  %10s %10s %.2f %8.2f\n' % (r, prop, target.name, weight, r / weight)
+            for i, r in enumerate(R_expa):
+                target = targets[i*2]
+                prop = 'expan'
+                weight = wExpansivity
+                txt += '%8.2f  %10s %10s %.2f %8.2f\n' % (r, prop, target.name, weight, r / weight)
+
             txt += '\nRSQ: %.2f\n' % np.sum(list(map(lambda x: x ** 2, R)))
 
             print(txt)
@@ -130,12 +149,24 @@ class Optimizer():
             for k, v in params.items():
                 paras[k] = v.value
 
-            J = []
+            J_dens = []
+            J_hvap = []
+            J_expa = []
             targets = self.db.session.query(Target).all()
             for target in targets:
                 dDens, dHvap = target.get_dDens_dHvap_from_paras(ppf_file, paras)
-                J.append([i / target.density * 100 * target.wDensity for i in dDens])  # deviation  percent
-                J.append([i / target.hvap * 100 * target.wHvap for i in dHvap])  # deviation  percent
+                J_dens.append([i / target.density * 100 * target.wDensity for i in dDens])  # deviation  percent
+                J_hvap.append([i / target.hvap * 100 * target.wHvap for i in dHvap])  # deviation  percent
+
+            ### thermal expansion
+            for i_mol in range(len(targets)//2):
+                target_T1 = targets[2*i_mol]
+                target_T2 = targets[2*i_mol + 1]
+                dExpa = (target_T1.dDens - target_T2.dDens) / (target_T1.density - target_T2.density) * 100 * wExpansivity
+                J_expa.append(list(dExpa))
+
+            J = J_dens + J_hvap + J_expa
+
 
             ### save result to database
             if result is None:
@@ -151,12 +182,24 @@ class Optimizer():
             for k in params.keys():
                 txt += '%10s' % k
             txt += '\n'
-            for i, row in enumerate(J):
-                name = targets[i // 2].name
-                prop = 'dens' if i % 2 == 0 else 'hvap'
+            for i, row in enumerate(J_dens):
+                name = targets[i].name
+                prop = 'density'
                 for item in row:
                     txt += '%10.2f' % item
-                txt += '  %s %s\n' % (name, prop)
+                txt += ' %10s %s\n' % (prop, name)
+            for i, row in enumerate(J_hvap):
+                name = targets[i].name
+                prop = 'hvap'
+                for item in row:
+                    txt += '%10.2f' % item
+                txt += ' %10s %s\n' % (prop, name)
+            for i, row in enumerate(J_expa):
+                name = targets[2*i].name
+                prop = 'expan'
+                for item in row:
+                    txt += '%10.2f' % item
+                txt += ' %10s %s\n' % (prop, name)
 
             print(txt)
             with open(LOG, 'a') as log:
@@ -166,6 +209,8 @@ class Optimizer():
             return J
 
         def callback(params: Parameters, iter: int, res: [float]):
+            print('Wait for 3 seconds ...')
+            time.sleep(3)
             ### clear _finished_ and job.sh for next iteration
             for target in self.db.session.query(Target).all():
                 target.clear_npt_result(ppf_file)

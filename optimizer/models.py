@@ -5,6 +5,7 @@ import sys
 import shutil
 from collections import OrderedDict
 
+import numpy as np
 import pybel
 import panedr
 from pandas import Series
@@ -56,6 +57,11 @@ class Target(Base):
     wHvap = NotNullColumn(Float)
     iteration = NotNullColumn(Integer, default=0)
 
+    def __init__(self):
+        self.sim_dens = None
+        self.sim_hvap = None
+        self.dDens = None
+
     def __repr__(self):
         return '<Target: %s %s %i>' % (self.name, self.smiles, self.T)
 
@@ -65,6 +71,10 @@ class Target(Base):
         self.n_mol = math.ceil(n_atoms / len(py_mol.atoms))
         if self.n_mol < n_mol:
             self.n_mol = n_mol
+
+    @property
+    def RT(self):
+        return 8.314 * self.T / 1000 # kJ/mol
 
     @property
     def dir_base_npt(self):
@@ -82,7 +92,7 @@ class Target(Base):
             mol2 = 'mol.mol2'
             py_mol = create_mol_from_smiles(self.smiles, pdb_out=pdb, mol2_out=mol2)
             mass = py_mol.molwt * self.n_mol
-            length = (10 / 6.022 * mass / (self.density - 0.1)) ** (1 / 3)  # assume cubic box
+            length = (10 / 6.022 * mass / (self.density / 1000 - 0.1)) ** (1 / 3)  # assume cubic box
 
             print('Build coordinates using Packmol: %s molecules ...' % self.n_mol)
             npt.packmol.build_box([pdb], [self.n_mol], 'init.pdb', length=length - 2, tolerance=1.7, silent=True)
@@ -99,7 +109,7 @@ class Target(Base):
 
         npt.jobmanager.refresh_preferred_queue()
         commands = npt.prepare(model_dir='..', T=self.T, P=self.P, jobname='NPT-%s-%i' % (self.name, self.T),
-                               dt=0.002, nst_eq=int(3E5), nst_run=int(2E5), nst_trr=250, nst_xtc=250)
+                               dt=0.002, nst_eq=int(3E5), nst_run=int(2E5), nst_trr=500, nst_xtc=500)
 
         nprocs = npt.jobmanager.nprocs
         if paras_diff is not None:
@@ -148,17 +158,27 @@ class Target(Base):
         print(os.getcwd())
 
         df = panedr.edr_to_df('npt.edr')
-        density = df.Density.mean() / 1000
+        density = df.Density.mean()
         df = panedr.edr_to_df('hvap.edr')
-        hvap = 8.314 * self.T / 1000 - df.Potential.mean() / self.n_mol
+        hvap = self.RT - df.Potential.mean() / self.n_mol
+        self.sim_dens = density
+        self.sim_hvap = hvap
         return density, hvap
 
     def get_dDens_dHvap_from_paras(self, ppf_file, paras: OrderedDict):
         # read density and Hvap series
+        os.chdir(self.dir_base_npt)
+        subdir = os.path.basename(ppf_file)[:-4]
+        os.chdir(subdir)
+        os.chdir(self.dir_child)
+
         df = panedr.edr_to_df('npt.edr')
         self.dens_series_npt: Series = df.Density
         df = panedr.edr_to_df('hvap.edr')
-        self.hvap_series_npt: Series = 8.314 * self.T / 1000 - df.Potential / self.n_mol
+        self.hvap_series_npt: Series = self.RT - df.Potential / self.n_mol
+
+        self.sim_dens = self.dens_series_npt.mean()
+        self.sim_hvap = self.hvap_series_npt.mean()
 
         dDens = []
         dHvap = []
@@ -166,6 +186,7 @@ class Target(Base):
             dD, dH = self.get_dDens_dHvap_from_para(ppf_file, k)
             dDens.append(dD)
             dHvap.append(dH)
+        self.dDens = np.array(dDens)
         return dDens, dHvap
 
     def get_dDens_dHvap_from_para(self, ppf_file, k) -> (float, float):
@@ -179,13 +200,13 @@ class Target(Base):
         pene_series_diff_p = df.Potential
 
         df = panedr.edr_to_df('diff-%s.1-hvap.edr' % k)
-        hvap_series_diff_p = 8.314 * self.T / 1000 - df.Potential / self.n_mol
+        hvap_series_diff_p = self.RT - df.Potential / self.n_mol
 
         df = panedr.edr_to_df('diff-%s.-1.edr' % k)
         pene_series_diff_n = df.Potential
 
         df = panedr.edr_to_df('diff-%s.-1-hvap.edr' % k)
-        hvap_series_diff_n = 8.314 * self.T / 1000 - df.Potential / self.n_mol
+        hvap_series_diff_n = self.RT - df.Potential / self.n_mol
 
         # calculate the derivative series dA/dp
         delta = get_delta_for_para(k)
@@ -200,8 +221,9 @@ class Target(Base):
         densXdPene = dens_series * dPene_series
         hvapXdPene = hvap_series * dPene_series
 
-        dDdp = -1 / 8.314 / self.T * (densXdPene.mean() - dens_series.mean() * dPene_series.mean())
-        dHdp = dHvap_series.mean() - 1 / 8.314 / self.T * (hvapXdPene.mean() - hvap_series.mean() * dPene_series.mean())
+        dDdp = -1 / self.RT * (densXdPene.mean() - self.sim_dens * dPene_series.mean())
+        dHdp = dHvap_series.mean() - 1 / self.RT * (hvapXdPene.mean() - self.sim_hvap * dPene_series.mean())
+
         return dDdp, dHdp
 
     def npt_finished(self, ppf_file) -> bool:
