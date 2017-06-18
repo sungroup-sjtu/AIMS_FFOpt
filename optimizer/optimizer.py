@@ -216,8 +216,9 @@ class Optimizer():
             print('Wait for 3 seconds ...')
             time.sleep(3)
             ### clear _finished_ and job.sh for next iteration
-            # for target in self.db.session.query(Target).all():
-            #     target.clear_npt_result(ppf_file)
+            ### TODO this is not good
+            for target in self.db.session.query(Target).all():
+                target.clear_npt_result(ppf_file)
 
         ppf = PPF(ppf_file)
         params = Parameters()
