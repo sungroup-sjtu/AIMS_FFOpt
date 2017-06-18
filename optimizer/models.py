@@ -103,8 +103,9 @@ class Target(Base):
         cd_or_create_and_cd(self.dir_child)
 
         npt.jobmanager.refresh_preferred_queue()
+        # TODO because of the float error in gmx edr file, MAKE SURE nst_edr equals nst_trr
         commands = npt.prepare(model_dir='..', T=self.T, P=self.P, jobname='NPT-%s-%i' % (self.name, self.T),
-                               dt=0.002, nst_eq=int(3E5), nst_run=int(2E5), nst_trr=200, nst_xtc=200)
+                               dt=0.002, nst_eq=int(3E5), nst_run=int(2E5), nst_edr=200, nst_trr=200, nst_xtc=200)
 
         nprocs = npt.jobmanager.nprocs
         if paras_diff is not None:
@@ -190,33 +191,34 @@ class Target(Base):
 
         # energy and Hvap after diff
         df = panedr.edr_to_df('diff-%s.1.edr' % k)
-        pene_series_diff_p = df.Potential
+        pene_array_diff_p = np.array(df.Potential)
 
         df = panedr.edr_to_df('diff-%s.1-hvap.edr' % k)
-        hvap_series_diff_p = self.RT - df.Potential / self.n_mol
+        hvap_array_diff_p = np.array(self.RT - df.Potential / self.n_mol)
 
         df = panedr.edr_to_df('diff-%s.-1.edr' % k)
-        pene_series_diff_n = df.Potential
+        pene_array_diff_n = np.array(df.Potential)
 
         df = panedr.edr_to_df('diff-%s.-1-hvap.edr' % k)
-        hvap_series_diff_n = self.RT - df.Potential / self.n_mol
+        hvap_array_diff_n = np.array(self.RT - df.Potential / self.n_mol)
 
         # calculate the derivative series dA/dp
         delta = get_delta_for_para(k)
-        dPene_series: Series = (pene_series_diff_p - pene_series_diff_n) / delta / 2
-        dHvap_series: Series = (hvap_series_diff_p - hvap_series_diff_n) / delta / 2
+        dPene_array = (pene_array_diff_p - pene_array_diff_n) / delta / 2
+        dHvap_array = (hvap_array_diff_p - hvap_array_diff_n) / delta / 2
 
         # extract out the required density and hvap
-        dens_series = self.dens_series_npt.loc[dPene_series.index]
-        hvap_series = self.hvap_series_npt.loc[dPene_series.index]
+        # TODO because of the float error in gmx edr file, the index in Series is errorous. Convert to array
+        dens_array = np.array(self.dens_series_npt)
+        hvap_array = np.array(self.hvap_series_npt)
 
         # calculate the derivative dA/dp according to ForceBalance
-        densXdPene = dens_series * dPene_series
-        hvapXdPene = hvap_series * dPene_series
+        densXdPene = dens_array * dPene_array
+        hvapXdPene = hvap_array * dPene_array
 
-        dDdp = -1 / self.RT * (densXdPene.mean() - dens_series.mean() * dPene_series.mean())
-        dHdp = dHvap_series.mean() - 1 / self.RT * (hvapXdPene.mean() - hvap_series.mean() * dPene_series.mean())
-        # !!! To accurately calculate the covariant, using dens_series.mean() instead of dens_series_npt.mean()
+        dDdp = -1 / self.RT * (densXdPene.mean() - dens_array.mean() * dPene_array.mean())
+        dHdp = dHvap_array.mean() - 1 / self.RT * (hvapXdPene.mean() - hvap_array.mean() * dPene_array.mean())
+        # !!! To accurately calculate the covariant, using dens_array.mean() instead of dens_series_npt.mean()
 
         return dDdp, dHdp
 
