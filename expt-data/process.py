@@ -54,7 +54,7 @@ for smiles, info in expt_data.items():
 
     A,B,C,n = paras[2:6]
     for t in t_list:
-        val = A*B**(-(1-t/C)**n) * 1000  # kg/m^3
+        val = A*B**(-(1-t/C)**n)  # kg/m^3
         exp_density.append(val)
 
     A,B,n = paras[6:9]
@@ -63,8 +63,8 @@ for smiles, info in expt_data.items():
         exp_hvap.append(val)
 
     for i, t in enumerate(t_list):
-        wDensity = math.exp(-abs(t-298)/200) + 1
+        # wDensity = math.exp(-abs(t-298)/200) + 1
         wDensity = 1
         wHvap = 0.2
-        print('%-10s %-40s %4i %4i %8i %8.2f %8.1f %8.2f' %(name, smiles, t, 1, exp_density[i], wDensity, exp_hvap[i], wHvap))
+        print('%-10s %-40s %4i %4i %8.3f %8.2f %8.1f %8.2f' %(name, smiles, t, 1, exp_density[i], wDensity, exp_hvap[i], wHvap))
 

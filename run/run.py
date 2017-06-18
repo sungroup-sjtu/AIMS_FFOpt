@@ -17,11 +17,7 @@ if __name__ == '__main__':
 
     elif cmd == 'optimize':
         ppf_file = os.path.abspath(sys.argv[2])
-        optimizer.optimize(ppf_file)
-
-    elif cmd == 'npt':
-        ppf_file = os.path.abspath(sys.argv[2])
-        optimizer.npt(ppf_file)
+        optimizer.optimize(ppf_file, 0.15)
 
     elif cmd == 'plot':
         ppfs = sys.argv[2:]

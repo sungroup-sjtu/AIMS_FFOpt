@@ -57,6 +57,7 @@ class Optimizer():
                     target.iteration += 1
                     target.run_npt(ppf_file, paras)
             self.db.session.commit()
+            os.chdir(self.CWD)
             ###
 
             while True:
@@ -81,8 +82,9 @@ class Optimizer():
                 dens, hvap = target.get_npt_result(os.path.basename(ppf_file)[:-4])
                 R_dens.append((dens - target.density) / target.density * 100 * target.wDensity)  # deviation  percent
                 R_hvap.append((hvap - target.hvap) / target.hvap * 100 * target.wHvap)  # deviation percent
+            os.chdir(self.CWD)
 
-            ### thermal expansion
+            ### thermal expansivity
             for i_mol in range(len(targets)//2):
                 target_T1 = targets[2*i_mol]
                 target_T2 = targets[2*i_mol + 1]
@@ -154,15 +156,17 @@ class Optimizer():
             J_expa = []
             targets = self.db.session.query(Target).all()
             for target in targets:
-                dDens, dHvap = target.get_dDens_dHvap_from_paras(ppf_file, paras)
-                J_dens.append([i / target.density * 100 * target.wDensity for i in dDens])  # deviation  percent
-                J_hvap.append([i / target.hvap * 100 * target.wHvap for i in dHvap])  # deviation  percent
+                dDdp_list, dHdp_list = target.get_dDens_dHvap_list_from_paras(ppf_file, paras)
+                J_dens.append([i / target.density * 100 * target.wDensity for i in dDdp_list])  # deviation  percent
+                J_hvap.append([i / target.hvap * 100 * target.wHvap for i in dHdp_list])  # deviation  percent
+            os.chdir(self.CWD)
 
-            ### thermal expansion
+            ### thermal expansivity
             for i_mol in range(len(targets)//2):
                 target_T1 = targets[2*i_mol]
                 target_T2 = targets[2*i_mol + 1]
-                dExpa = (target_T1.dDens - target_T2.dDens) / (target_T1.density - target_T2.density) * 100 * wExpansivity
+                dExpa = (target_T1.dDdp_array - target_T2.dDdp_array) / (target_T1.density - target_T2.density)\
+                        * 100 * wExpansivity
                 J_expa.append(list(dExpa))
 
             J = J_dens + J_hvap + J_expa
@@ -212,8 +216,8 @@ class Optimizer():
             print('Wait for 3 seconds ...')
             time.sleep(3)
             ### clear _finished_ and job.sh for next iteration
-            for target in self.db.session.query(Target).all():
-                target.clear_npt_result(ppf_file)
+            # for target in self.db.session.query(Target).all():
+            #     target.clear_npt_result(ppf_file)
 
         ppf = PPF(ppf_file)
         params = Parameters()

@@ -57,11 +57,6 @@ class Target(Base):
     wHvap = NotNullColumn(Float)
     iteration = NotNullColumn(Integer, default=0)
 
-    def __init__(self):
-        self.sim_dens = None
-        self.sim_hvap = None
-        self.dDens = None
-
     def __repr__(self):
         return '<Target: %s %s %i>' % (self.name, self.smiles, self.T)
 
@@ -74,7 +69,7 @@ class Target(Base):
 
     @property
     def RT(self):
-        return 8.314 * self.T / 1000 # kJ/mol
+        return 8.314 * self.T / 1000  # kJ/mol
 
     @property
     def dir_base_npt(self):
@@ -92,7 +87,7 @@ class Target(Base):
             mol2 = 'mol.mol2'
             py_mol = create_mol_from_smiles(self.smiles, pdb_out=pdb, mol2_out=mol2)
             mass = py_mol.molwt * self.n_mol
-            length = (10 / 6.022 * mass / (self.density / 1000 - 0.1)) ** (1 / 3)  # assume cubic box
+            length = (10 / 6.022 * mass / (self.density - 0.1)) ** (1 / 3)  # assume cubic box
 
             print('Build coordinates using Packmol: %s molecules ...' % self.n_mol)
             npt.packmol.build_box([pdb], [self.n_mol], 'init.pdb', length=length - 2, tolerance=1.7, silent=True)
@@ -158,36 +153,34 @@ class Target(Base):
         print(os.getcwd())
 
         df = panedr.edr_to_df('npt.edr')
-        density = df.Density.mean()
+        density = df.Density.mean() / 1000  # convert to g/mL
+        self.sim_dens = density  # save self.sim_dens for calculating thermal expansivity
         df = panedr.edr_to_df('hvap.edr')
         hvap = self.RT - df.Potential.mean() / self.n_mol
-        self.sim_dens = density
-        self.sim_hvap = hvap
+
         return density, hvap
 
-    def get_dDens_dHvap_from_paras(self, ppf_file, paras: OrderedDict):
-        # read density and Hvap series
+    def get_dDens_dHvap_list_from_paras(self, ppf_file, paras: OrderedDict):
+        # read density and Hvap list
         os.chdir(self.dir_base_npt)
         subdir = os.path.basename(ppf_file)[:-4]
         os.chdir(subdir)
         os.chdir(self.dir_child)
 
         df = panedr.edr_to_df('npt.edr')
-        self.dens_series_npt: Series = df.Density
+        self.dens_series_npt: Series = df.Density / 1000  # convert to g/mL
         df = panedr.edr_to_df('hvap.edr')
         self.hvap_series_npt: Series = self.RT - df.Potential / self.n_mol
 
-        self.sim_dens = self.dens_series_npt.mean()
-        self.sim_hvap = self.hvap_series_npt.mean()
-
-        dDens = []
-        dHvap = []
+        dDdp_list = []
+        dHdp_list = []
         for k in paras.keys():
-            dD, dH = self.get_dDens_dHvap_from_para(ppf_file, k)
-            dDens.append(dD)
-            dHvap.append(dH)
-        self.dDens = np.array(dDens)
-        return dDens, dHvap
+            dDdp, dHdp = self.get_dDens_dHvap_from_para(ppf_file, k)
+            dDdp_list.append(dDdp)
+            dHdp_list.append(dHdp)
+        self.dDdp_array = np.array(dDdp_list)  # save dDdp_array for calculating thermal expansivity
+
+        return dDdp_list, dHdp_list
 
     def get_dDens_dHvap_from_para(self, ppf_file, k) -> (float, float):
         os.chdir(self.dir_base_npt)
@@ -221,8 +214,9 @@ class Target(Base):
         densXdPene = dens_series * dPene_series
         hvapXdPene = hvap_series * dPene_series
 
-        dDdp = -1 / self.RT * (densXdPene.mean() - self.sim_dens * dPene_series.mean())
-        dHdp = dHvap_series.mean() - 1 / self.RT * (hvapXdPene.mean() - self.sim_hvap * dPene_series.mean())
+        dDdp = -1 / self.RT * (densXdPene.mean() - dens_series.mean() * dPene_series.mean())
+        dHdp = dHvap_series.mean() - 1 / self.RT * (hvapXdPene.mean() - hvap_series.mean() * dPene_series.mean())
+        # !!! To accurately calculate the covariant, using dens_series.mean() instead of dens_series_npt.mean()
 
         return dDdp, dHdp
 
