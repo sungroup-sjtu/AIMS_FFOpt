@@ -104,7 +104,7 @@ class Target(Base):
 
         npt.jobmanager.refresh_preferred_queue()
         commands = npt.prepare(model_dir='..', T=self.T, P=self.P, jobname='NPT-%s-%i' % (self.name, self.T),
-                               dt=0.002, nst_eq=int(3E5), nst_run=int(2E5), nst_trr=500, nst_xtc=500)
+                               dt=0.002, nst_eq=int(3E5), nst_run=int(2E5), nst_trr=200, nst_xtc=200)
 
         nprocs = npt.jobmanager.nprocs
         if paras_diff is not None:
