@@ -7,7 +7,7 @@ from collections import OrderedDict
 import numpy as np
 from lmfit import Parameters, Minimizer
 
-from .ppf import PPF, get_bound_for_para
+from .ppf import PPF
 from .db import DB
 from .models import Target, Result
 
@@ -25,7 +25,7 @@ class Optimizer():
         target = self.db.session.query(Target).first()
         return target.iteration
 
-    def optimize(self, ppf_file, wExpansivity):
+    def optimize(self, ppf_file, wExpansivity, qmd=None, msd=None, torsion=None):
         LOG = os.path.join(self.CWD, 'Opt-%s.log' % os.path.basename(ppf_file)[:-4])
 
         def residual(params: Parameters):
@@ -46,7 +46,11 @@ class Optimizer():
             paras = OrderedDict()
             for k, v in params.items():
                 paras[k] = v.value
-            ppf.set_lj_para(paras)
+            ppf.set_nb_paras(paras)
+
+            if torsion is not None:
+                print('Fit torsion based on new non-bonded parameters...')
+                ppf.fit_torsion(qmd, msd, torsion)
 
             shutil.copy(ppf_file, ppf_file + '.bak-%i' % self.iteration)
             ppf.write(ppf_file)
@@ -85,14 +89,14 @@ class Optimizer():
             os.chdir(self.CWD)
 
             ### thermal expansivity
-            for i_mol in range(len(targets)//2):
-                target_T1 = targets[2*i_mol]
-                target_T2 = targets[2*i_mol + 1]
-                res_Kt = ((target_T1.sim_dens - target_T2.sim_dens) / (target_T1.density - target_T2.density) -1) \
-                        * 100 * wExpansivity
+            for i_mol in range(len(targets) // 2):
+                target_T1 = targets[2 * i_mol]
+                target_T2 = targets[2 * i_mol + 1]
+                res_Kt = ((target_T1.sim_dens - target_T2.sim_dens) / (target_T1.density - target_T2.density) - 1) \
+                         * 100 * wExpansivity
                 R_expa.append(res_Kt)
 
-            R = R_dens + R_hvap +R_expa
+            R = R_dens + R_hvap + R_expa
 
             ### save result to database
             if result is None:
@@ -120,7 +124,7 @@ class Optimizer():
                 weight = target.wHvap
                 txt += '%8.2f  %10s %10s %.2f %8.2f\n' % (r, prop, target.name, weight, r / weight)
             for i, r in enumerate(R_expa):
-                target = targets[i*2]
+                target = targets[i * 2]
                 prop = 'expan'
                 weight = wExpansivity
                 txt += '%8.2f  %10s %10s %.2f %8.2f\n' % (r, prop, target.name, weight, r / weight)
@@ -162,15 +166,14 @@ class Optimizer():
             os.chdir(self.CWD)
 
             ### thermal expansivity
-            for i_mol in range(len(targets)//2):
-                target_T1 = targets[2*i_mol]
-                target_T2 = targets[2*i_mol + 1]
-                dExpa = (target_T1.dDdp_array - target_T2.dDdp_array) / (target_T1.density - target_T2.density)\
+            for i_mol in range(len(targets) // 2):
+                target_T1 = targets[2 * i_mol]
+                target_T2 = targets[2 * i_mol + 1]
+                dExpa = (target_T1.dDdp_array - target_T2.dDdp_array) / (target_T1.density - target_T2.density) \
                         * 100 * wExpansivity
                 J_expa.append(list(dExpa))
 
             J = J_dens + J_hvap + J_expa
-
 
             ### save result to database
             if result is None:
@@ -199,7 +202,7 @@ class Optimizer():
                     txt += '%10.2f' % item
                 txt += ' %10s %s\n' % (prop, name)
             for i, row in enumerate(J_expa):
-                name = targets[2*i].name
+                name = targets[2 * i].name
                 prop = 'expan'
                 for item in row:
                     txt += '%10.2f' % item
@@ -222,8 +225,8 @@ class Optimizer():
 
         ppf = PPF(ppf_file)
         params = Parameters()
-        for k, v in ppf.adj_lj_paras.items():
-            bound = get_bound_for_para(k)
+        for k, v in ppf.get_adj_nb_paras().items():
+            bound = PPF.get_bound_for_para(k)
             params.add(k, value=v, min=bound[0], max=bound[1])
 
         minimize = Minimizer(residual, params, iter_cb=callback)

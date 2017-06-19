@@ -20,7 +20,7 @@ from sqlalchemy.ext.declarative import declarative_base
 Base = declarative_base()
 metadata = Base.metadata
 
-from .ppf import PPF, get_delta_for_para
+from .ppf import PPF
 from .config import Config
 
 sys.path.append(Config.MS_TOOLS_DIR)
@@ -119,9 +119,9 @@ class Target(Base):
                     top_out_hvap = basename + '-hvap.top'
 
                     paras = copy.copy(paras_diff)
-                    paras[k] += get_delta_for_para(k) * i
+                    paras[k] += PPF.get_delta_for_para(k) * i
                     ppf = PPF(ppf_file)
-                    ppf.set_lj_para(paras)
+                    ppf.set_nb_paras(paras)
                     ppf.write(ppf_out)
 
                     shutil.copy('../../init.msd', msd_out)
@@ -203,7 +203,7 @@ class Target(Base):
         hvap_array_diff_n = np.array(self.RT - df.Potential / self.n_mol)
 
         # calculate the derivative series dA/dp
-        delta = get_delta_for_para(k)
+        delta = PPF.get_delta_for_para(k)
         dPene_array = (pene_array_diff_p - pene_array_diff_n) / delta / 2
         dHvap_array = (hvap_array_diff_p - hvap_array_diff_n) / delta / 2
 

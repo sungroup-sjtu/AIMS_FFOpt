@@ -5,10 +5,10 @@ from typing import Dict
 class PPF():
     def __init__(self, ppf_file):
         with open(ppf_file) as f:
-            self.terms = f.read().splitlines()
+            lines = f.read().splitlines()
+            self.terms = [l.strip() for l in lines]
 
-    @property
-    def adj_lj_paras(self) -> OrderedDict:
+    def get_adj_nb_paras(self) -> OrderedDict:
         terms = OrderedDict()
         for term in self.terms:
             if not (term.startswith('N12_6') or term.startswith('BINC')):
@@ -40,7 +40,7 @@ class PPF():
                     terms['%s_%s_bi' % (a1_type, a2_type)] = float(para)
         return terms
 
-    def set_lj_para(self, new_paras: Dict):
+    def set_nb_paras(self, new_paras: Dict):
         terms = [''] * len(self.terms)
         replaced = False
         for i, term in enumerate(self.terms):
@@ -98,38 +98,62 @@ class PPF():
             for term in self.terms:
                 f.write(term + '\n')
 
+    def fit_torsion(self, qmd=None, msd=None, torsion=None):
+        import os
+        import random
+        from mstools.wrapper import DFF
+        from .config import Config
 
-def get_delta_for_para(key):
-    if key.endswith('r0'):
-        delta = 0.05
-    elif key.endswith('e0'):
-        delta = 0.001
-    elif key.endswith('bi'):
-        delta = 0.005
-    else:
-        raise Exception('Unknown parameter: ' + key)
+        # Backup adj_nb_paras
+        adj_nb_paras = self.get_adj_nb_paras()
 
-    return delta
-
-
-def get_bound_for_para(key):
-    if key.endswith('r0'):
-        if key.startswith('c'):
-            bound = (3, 5)
-        elif key.startswith('h'):
-            bound = (2, 4)
+        dff = DFF(dff_root=Config.DFF_ROOT)
+        ppf_tmp = 'tmp-%i.ppf' % random.randint(1E7, 1E8)
+        ppf_tmp2 = 'tmp-%i.ppf' % random.randint(1E7, 1E8)
+        self.write(ppf_tmp)
+        try:
+            dff.fit_torsion(qmd, msd, ppf_tmp, ppf_tmp2, torsion)
+        except Exception as e:
+            print(str(e))
         else:
-            bound = (2, 5)
-    elif key.endswith('e0'):
-        if key.startswith('c'):
-            bound = (0.02, 0.12)
-        elif key.startswith('h'):
-            bound = (0.005, 0.1)
-        else:
-            bound = (0.005, 0.12)
-    elif key.endswith('bi'):
-        bound = (-0.2, 0)
-    else:
-        raise Exception('Unknown parameter: ' + key)
+            self.__init__(ppf_tmp2)
+            # restore adj_nb_paras
+            self.set_nb_paras(adj_nb_paras)
+        os.remove(ppf_tmp)
+        os.remove(ppf_tmp2)
 
-    return bound
+    @staticmethod
+    def get_delta_for_para(key):
+        if key.endswith('r0'):
+            delta = 0.05
+        elif key.endswith('e0'):
+            delta = 0.001
+        elif key.endswith('bi'):
+            delta = 0.005
+        else:
+            raise Exception('Unknown parameter: ' + key)
+
+        return delta
+
+    @staticmethod
+    def get_bound_for_para(key):
+        if key.endswith('r0'):
+            if key.startswith('c'):
+                bound = (3, 5)
+            elif key.startswith('h'):
+                bound = (2, 4)
+            else:
+                bound = (2, 5)
+        elif key.endswith('e0'):
+            if key.startswith('c'):
+                bound = (0.02, 0.12)
+            elif key.startswith('h'):
+                bound = (0.005, 0.1)
+            else:
+                bound = (0.005, 0.12)
+        elif key.endswith('bi'):
+            bound = (-0.2, 0)
+        else:
+            raise Exception('Unknown parameter: ' + key)
+
+        return bound
