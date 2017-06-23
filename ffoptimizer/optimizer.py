@@ -160,9 +160,9 @@ class Optimizer():
 
                 if gtx_dirs != []:
                     from .models import npt
-                    commands_list = npt.gmx.generate_gmx_multidir_cmds(gtx_dirs, gtx_cmds)
+                    commands_list = npt.gmx.generate_gpu_multidir_cmds(gtx_dirs, gtx_cmds)
                     npt.jobmanager.queue = 'gtx'
-                    npt.jobmanager.nprocs = '2'
+                    npt.jobmanager.nprocs = 2
                     for i, commands in enumerate(commands_list):
                         sh = os.path.join(task.dir, '_job.multi-%i.sh' % i)
                         npt.jobmanager.generate_sh(task.dir, commands, name='NPT-GTX-%i-%i' % (task.iteration, i),

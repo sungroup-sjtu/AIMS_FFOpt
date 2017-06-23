@@ -130,13 +130,14 @@ class Target(Base):
 
         npt.msd = '_tmp.msd'
         shutil.copy('../init.msd', npt.msd)
-        npt.export(ppf=ppf_file, minimize=True)
+        npt.export(ppf=ppf_file, minimize=False)
 
         npt.jobmanager.refresh_preferred_queue()
         # TODO because of the float error in gmx edr file, MAKE SURE nst_edr equals nst_trr and nst_xtc
         commands = npt.prepare(T=self.T, P=self.P, jobname='NPT-%s-%i' % (self.name, self.T),
                                dt=0.002, nst_eq=int(3E5), nst_run=int(2E5), nst_edr=200, nst_trr=200, nst_xtc=200)
 
+        commands.insert(0, 'touch _started_')
         nprocs = npt.jobmanager.nprocs
         ppf_diff = '_tmp.ppf'
         if paras_diff is not None:
@@ -257,18 +258,18 @@ class Target(Base):
         return False
 
     def npt_started(self) -> bool:
-        sh_job = os.path.join(self.dir_iteration, jobmanager.sh)
-        if os.path.exists(sh_job):
+        log_started = os.path.join(self.dir_iteration, '_started_')
+        if os.path.exists(log_started):
             return True
 
         return False
 
     def clear_npt_result(self):
+        log_started = os.path.join(self.dir_iteration, '_started_')
         log_finished = os.path.join(self.dir_iteration, '_finished_')
-        sh_job = os.path.join(self.dir_iteration, jobmanager.sh)
         try:
+            os.remove(log_started)
             os.remove(log_finished)
-            shutil.move(sh_job, sh_job + '.bak')
         except:
             pass
 
