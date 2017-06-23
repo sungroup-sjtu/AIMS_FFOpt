@@ -3,10 +3,17 @@ from typing import Dict
 
 
 class PPF():
-    def __init__(self, ppf_file):
-        with open(ppf_file) as f:
-            lines = f.read().splitlines()
-            self.terms = [l.strip() for l in lines]
+    def __init__(self, ppf_file=None, string=None):
+        lines = []
+        if ppf_file is not None:
+            with open(ppf_file) as f:
+                lines = f.read().splitlines()
+        if string is not None:
+            lines = string.splitlines()
+        self.terms = [l.strip() for l in lines]
+
+    def __str__(self):
+        return '\n'.join(self.terms)
 
     def get_adj_nb_paras(self) -> OrderedDict:
         terms = OrderedDict()
@@ -95,8 +102,7 @@ class PPF():
 
     def write(self, ppf_out):
         with open(ppf_out, 'w') as f:
-            for term in self.terms:
-                f.write(term + '\n')
+            f.write(str(self))
 
     def fit_torsion(self, qmd=None, msd=None, torsion=None):
         import os

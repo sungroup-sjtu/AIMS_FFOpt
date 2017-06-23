@@ -9,7 +9,8 @@ import numpy as np
 import pybel
 import panedr
 from pandas import Series
-from sqlalchemy import Column, Integer, Text, Float, String
+from sqlalchemy import Column, Integer, Text, Float, String, ForeignKey
+from sqlalchemy.orm import relationship
 
 from functools import partial
 
@@ -43,9 +44,38 @@ kwargs = {'packmol_bin': Config.PACKMOL_BIN, 'dff_root': Config.DFF_ROOT,
 npt = Npt(**kwargs)
 
 
+class Task(Base):
+    __tablename__ = 'task'
+    id = NotNullColumn(Integer, primary_key=True)
+    name = NotNullColumn(String(200), unique=True)
+    ppf = NotNullColumn(Text)
+    cwd = NotNullColumn(String(200))
+    iteration = NotNullColumn(Integer, default=0)
+
+    targets = relationship('Target', lazy='dynamic')
+    results = relationship('Result', lazy='dynamic')
+
+    @property
+    def dir(self):
+        return os.path.join(self.cwd, self.name)
+
+    def npt_started(self):
+        for target in self.targets:
+            if not target.npt_started():
+                return False
+        return True
+
+    def npt_finished(self):
+        for target in self.targets:
+            if not target.npt_finished():
+                return False
+        return True
+
+
 class Target(Base):
     __tablename__ = 'target'
     id = NotNullColumn(Integer, primary_key=True)
+    task_id = NotNullColumn(Integer, ForeignKey(Task.id))
     name = NotNullColumn(String(200))
     smiles = NotNullColumn(Text)
     n_mol = Column(Integer, nullable=True)
@@ -53,12 +83,13 @@ class Target(Base):
     P = NotNullColumn(Integer)
     density = NotNullColumn(Float)
     hvap = NotNullColumn(Float)
-    wDensity = NotNullColumn(Float)
+    wDens = NotNullColumn(Float)
     wHvap = NotNullColumn(Float)
-    iteration = NotNullColumn(Integer, default=0)
+
+    task = relationship(Task)
 
     def __repr__(self):
-        return '<Target: %s %s %i>' % (self.name, self.smiles, self.T)
+        return '<Target: %s %s %i %i>' % (self.name, self.smiles, self.T, self.P)
 
     def calc_n_mol(self, n_atoms=3000, n_mol=0):
         py_mol = pybel.readstring('smi', self.smiles)
@@ -73,11 +104,11 @@ class Target(Base):
 
     @property
     def dir_base_npt(self):
-        return os.path.join(Config.WORK_DIR, 'NPT-%s' % (self.name))
+        return os.path.join(self.task.dir, 'NPT-%s' % (self.name))
 
     @property
-    def dir_child(self):
-        return '%i-%i-%i' % (self.T, self.P, self.iteration)
+    def dir_iteration(self):
+        return os.path.join(self.dir_base_npt, '%i-%i-%i' % (self.T, self.P, self.task.iteration))
 
     def run_npt(self, ppf_file=None, paras_diff: OrderedDict = None):
         cd_or_create_and_cd(self.dir_base_npt)
@@ -95,24 +126,21 @@ class Target(Base):
             print('Create box using DFF ...')
             npt.dff.build_box_after_packmol([mol2], [self.n_mol], 'init.msd', mol_corr='init.pdb', length=length)
 
-        cd_or_create_and_cd(os.path.basename('%s' % ppf_file)[:-4])
+        cd_or_create_and_cd(self.dir_iteration)
 
-        npt.msd = '../init.msd'
+        shutil.copy('../init.msd', npt.msd)
         npt.export(ppf=ppf_file, minimize=True)
 
-        cd_or_create_and_cd(self.dir_child)
-
         npt.jobmanager.refresh_preferred_queue()
-        # TODO because of the float error in gmx edr file, MAKE SURE nst_edr equals nst_trr
-        commands = npt.prepare(model_dir='..', T=self.T, P=self.P, jobname='NPT-%s-%i' % (self.name, self.T),
+        # TODO because of the float error in gmx edr file, MAKE SURE nst_edr equals nst_trr and nst_xtc
+        commands = npt.prepare(T=self.T, P=self.P, jobname='NPT-%s-%i' % (self.name, self.T),
                                dt=0.002, nst_eq=int(3E5), nst_run=int(2E5), nst_edr=200, nst_trr=200, nst_xtc=200)
 
         nprocs = npt.jobmanager.nprocs
+        ppf_diff = '_tmp.ppf'
         if paras_diff is not None:
             commands.append('export GMX_MAXCONSTRWARN=-1')
             for k in paras_diff.keys():
-                msd_out = '_tmp.msd'
-                ppf_out = '_tmp.ppf'
                 for i in [-1, 1]:
                     basename = 'diff-%s.%i' % (k, i)
                     top_out = basename + '.top'
@@ -122,11 +150,10 @@ class Target(Base):
                     paras[k] += PPF.get_delta_for_para(k) * i
                     ppf = PPF(ppf_file)
                     ppf.set_nb_paras(paras)
-                    ppf.write(ppf_out)
+                    ppf.write(ppf_diff)
 
-                    shutil.copy('../../init.msd', msd_out)
-                    npt.dff.set_charge([msd_out], ppf_out)
-                    npt.dff.export_gmx(msd_out, ppf_out, gro_out='_tmp.gro', top_out=top_out)
+                    npt.dff.set_charge([npt.msd], ppf_diff)
+                    npt.dff.export_gmx(npt.msd, ppf_diff, gro_out='_tmp.gro', top_out=top_out)
 
                     npt.gmx.prepare_mdp_from_template('t_npt.mdp', mdp_out='diff.mdp', nstxtcout=0)
                     cmd = npt.gmx.grompp(mdp='diff.mdp', top=top_out, tpr_out=basename + '.tpr', get_cmd=True)
@@ -142,14 +169,14 @@ class Target(Base):
                     commands.append(cmd)
 
         commands.append('touch _finished_')
-        npt.jobmanager.generate_sh(os.getcwd(), commands, name='NPT-%s-%i-%i' % (self.name, self.T, self.iteration))
+        npt.jobmanager.generate_sh(os.getcwd(), commands,
+                                   name='NPT-%s-%i-%i' % (self.name, self.T, self.task.iteration))
         npt.run()
 
-    def get_npt_result(self, subdir, iteration=None) -> (float, float):
+    def get_npt_result(self, iteration=None) -> (float, float):
         if iteration is None:
             iteration = self.iteration
         os.chdir(self.dir_base_npt)
-        os.chdir(subdir)
         os.chdir('%i-%i-%i' % (self.T, self.P, iteration))
         print(os.getcwd())
 
@@ -161,12 +188,9 @@ class Target(Base):
 
         return density, hvap
 
-    def get_dDens_dHvap_list_from_paras(self, ppf_file, paras: OrderedDict):
+    def get_dDens_dHvap_list_from_paras(self, paras: OrderedDict):
         # read density and Hvap list
-        os.chdir(self.dir_base_npt)
-        subdir = os.path.basename(ppf_file)[:-4]
-        os.chdir(subdir)
-        os.chdir(self.dir_child)
+        os.chdir(self.dir_iteration)
 
         df = panedr.edr_to_df('npt.edr')
         self.dens_series_npt: Series = df.Density / 1000  # convert to g/mL
@@ -176,18 +200,15 @@ class Target(Base):
         dDdp_list = []
         dHdp_list = []
         for k in paras.keys():
-            dDdp, dHdp = self.get_dDens_dHvap_from_para(ppf_file, k)
+            dDdp, dHdp = self.get_dDens_dHvap_from_para(k)
             dDdp_list.append(dDdp)
             dHdp_list.append(dHdp)
         self.dDdp_array = np.array(dDdp_list)  # save dDdp_array for calculating thermal expansivity
 
         return dDdp_list, dHdp_list
 
-    def get_dDens_dHvap_from_para(self, ppf_file, k) -> (float, float):
-        os.chdir(self.dir_base_npt)
-        subdir = os.path.basename(ppf_file)[:-4]
-        os.chdir(subdir)
-        os.chdir(self.dir_child)
+    def get_dDens_dHvap_from_para(self, k) -> (float, float):
+        os.chdir(self.dir_iteration)
 
         # energy and Hvap after diff
         df = panedr.edr_to_df('diff-%s.1.edr' % k)
@@ -222,27 +243,23 @@ class Target(Base):
 
         return dDdp, dHdp
 
-    def npt_finished(self, ppf_file) -> bool:
-        subdir = os.path.basename(ppf_file)[:-4]
-        log_finished = os.path.join(self.dir_base_npt, subdir, self.dir_child, '_finished_')
+    def npt_finished(self) -> bool:
+        log_finished = os.path.join(self.dir_iteration, '_finished_')
         if os.path.exists(log_finished):
             return True
 
         return False
 
-    def npt_started(self, ppf_file) -> bool:
-        subdir = os.path.basename(ppf_file)[:-4]
-        sh_job = os.path.join(self.dir_base_npt, subdir, self.dir_child, jobmanager.sh)
+    def npt_started(self) -> bool:
+        sh_job = os.path.join(self.dir_iteration, jobmanager.sh)
         if os.path.exists(sh_job):
             return True
 
         return False
 
-    def clear_npt_result(self, ppf_file):
-        subdir = os.path.basename(ppf_file)[:-4]
-        dir = os.path.join(self.dir_base_npt, subdir, self.dir_child)
-        log_finished = os.path.join(dir, '_finished_')
-        sh_job = os.path.join(dir, jobmanager.sh)
+    def clear_npt_result(self):
+        log_finished = os.path.join(self.dir_iteration, '_finished_')
+        sh_job = os.path.join(self.dir_iteration, jobmanager.sh)
         try:
             os.remove(log_finished)
             shutil.move(sh_job, sh_job + '.bak')
@@ -253,7 +270,11 @@ class Target(Base):
 class Result(Base):
     __tablename__ = 'result'
     id = NotNullColumn(Integer, primary_key=True)
+    task_id = NotNullColumn(Integer, ForeignKey(Task.id))
+    iteration = NotNullColumn(Integer)
     ppf = NotNullColumn(String(200))
     parameter = Column(Text, nullable=True)
     residual = Column(Text, nullable=True)
     jacobian = Column(Text, nullable=True)
+
+    task = relationship(Task)
