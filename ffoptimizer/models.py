@@ -157,7 +157,7 @@ class Target(Base):
                     npt.dff.set_charge([npt.msd], ppf_diff)
                     npt.dff.export_gmx(npt.msd, ppf_diff, gro_out='_tmp.gro', top_out=top_out)
 
-                    npt.gmx.prepare_mdp_from_template('t_npt.mdp', mdp_out='diff.mdp', nstxtcout=0)
+                    npt.gmx.prepare_mdp_from_template('t_npt.mdp', mdp_out='diff.mdp', nstxtcout=0, restart=True)
                     cmd = npt.gmx.grompp(mdp='diff.mdp', top=top_out, tpr_out=basename + '.tpr', get_cmd=True)
                     commands.append(cmd)
                     cmd = npt.gmx.mdrun(name=basename, nprocs=nprocs, rerun='npt.trr', get_cmd=True)

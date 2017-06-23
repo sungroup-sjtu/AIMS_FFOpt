@@ -358,30 +358,30 @@ class Optimizer():
 
         props = dict()
         for target in self.db.session.query(Target).all():
-            name = target.name
-            if not name in props.keys():
-                props[name] = {'smiles': target.smiles,
+            mol = target.name
+            if not mol in props.keys():
+                props[mol] = {'smiles': target.smiles,
                                'T': [],
                                'dens': OrderedDict([('expt', [])]),
                                'hvap': OrderedDict([('expt', [])])
                                }
-            props[name]['T'].append(target.T)
-            props[name]['dens']['expt'].append(target.density)
-            props[name]['hvap']['expt'].append(target.hvap)
+            props[mol]['T'].append(target.T)
+            props[mol]['dens']['expt'].append(target.density)
+            props[mol]['hvap']['expt'].append(target.hvap)
 
             for i in iterations:
-                if i not in props[name]['dens'].keys():
-                    props[name]['dens'][i] = []
-                    props[name]['hvap'][i] = []
+                if i not in props[mol]['dens'].keys():
+                    props[mol]['dens'][i] = []
+                    props[mol]['hvap'][i] = []
 
                 density, hvap = target.get_npt_result(i)
 
-                props[name]['dens'][i].append(density)
-                props[name]['hvap'][i].append(hvap)
+                props[mol]['dens'][i].append(density)
+                props[mol]['hvap'][i].append(hvap)
 
         os.chdir(self.CWD)
         pylab.rcParams.update({'font.size': 12})
-        for name, prop in props.items():
+        for mol, prop in props.items():
             pylab.figure(figsize=(6, 8))
             pylab.subplot(211)
             for i, points in prop['dens'].items():
@@ -395,7 +395,7 @@ class Optimizer():
             y_mean = np.mean(prop['dens']['expt'])
             pylab.ylim(y_mean - 0.2, y_mean + 0.2)
             pylab.legend()
-            pylab.title('Density %s %s (g/mL)' % (name, prop['smiles']))
+            pylab.title('Density %s %s (g/mL)' % (mol, prop['smiles']))
 
             pylab.subplot(212)
             for i, points in prop['hvap'].items():
@@ -409,5 +409,5 @@ class Optimizer():
             y_mean = np.mean(prop['hvap']['expt'])
             pylab.ylim(y_mean - 20, y_mean + 20)
             pylab.legend()
-            pylab.title('HVap %s %s (kJ/mol)' % (name, prop['smiles']))
-            pylab.savefig('property-%s.png' % name)
+            pylab.title('HVap %s %s (kJ/mol)' % (mol, prop['smiles']))
+            pylab.savefig('%s-%s.png' % (task.name, mol))
