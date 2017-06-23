@@ -167,6 +167,7 @@ class Optimizer():
                         sh = os.path.join(task.dir, '_job.multi-%i.sh' % i)
                         npt.jobmanager.generate_sh(task.dir, commands, name='NPT-GTX-%i-%i' % (task.iteration, i),
                                                    sh=sh)
+                        time.sleep(3)
                         npt.jobmanager.submit(sh)
 
             while True:
@@ -215,24 +216,28 @@ class Optimizer():
             txt += '\nPARAMETERS:\n'
             for k, v in params.items():
                 txt += '%10.5f  %s\n' % (v.value, k)
-            txt += '\nRESIDUE:\n'
+            txt += '\n%8s %8s %10s %8s %8s %s %s\n' % (
+                'RESIDUAL', 'Property', 'Deviation', 'Expt.', 'Weight', 'Molecule', 'SMILES')
             for i, r in enumerate(R_dens):
                 target = targets[i]
                 prop = 'density'
                 weight = target.wDens
-                txt += '%8.2f %10s %8.2f %8.2f %% %s\n' % (r, prop, weight, r / weight, target.name)
+                txt += '%8.2f %8s %8.2f %% %8.3f %8.2f %s %s\n' \
+                       % (r, prop, r / weight, target.density, weight, target.name, target.smiles)
             for i, r in enumerate(R_hvap):
                 target = targets[i]
                 prop = 'hvap'
                 weight = target.wHvap
-                txt += '%8.2f %10s %8.2f %8.2f %% %s\n' % (r, prop, weight, r / weight, target.name)
+                txt += '%8.2f %8s %8.2f %% %8.2f %8.2f %s %s\n' \
+                       % (r, prop, r / weight, target.hvap, weight, target.name, target.smiles)
 
             if wExpansivity != 0:
                 for i, r in enumerate(R_expa):
                     target = targets[i * 2]
                     prop = 'expan'
                     weight = wExpansivity
-                    txt += '%8.2f %10s %8.2f %8.2f %% %s\n' % (r, prop, weight, r / weight, target.name)
+                    txt += '%8.2f %8s %8.2f %% %8s %8.2f %s %s\n' \
+                           % (r, prop, r / weight, '', weight, target.name, target.smiles)
 
             print(txt)
             with open(LOG, 'a') as log:
@@ -361,10 +366,10 @@ class Optimizer():
             mol = target.name
             if not mol in props.keys():
                 props[mol] = {'smiles': target.smiles,
-                               'T': [],
-                               'dens': OrderedDict([('expt', [])]),
-                               'hvap': OrderedDict([('expt', [])])
-                               }
+                              'T': [],
+                              'dens': OrderedDict([('expt', [])]),
+                              'hvap': OrderedDict([('expt', [])])
+                              }
             props[mol]['T'].append(target.T)
             props[mol]['dens']['expt'].append(target.density)
             props[mol]['hvap']['expt'].append(target.hvap)
