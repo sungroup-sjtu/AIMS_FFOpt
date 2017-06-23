@@ -110,7 +110,7 @@ class Target(Base):
     def dir_iteration(self):
         return os.path.join(self.dir_base_npt, '%i-%i-%i' % (self.T, self.P, self.task.iteration))
 
-    def run_npt(self, ppf_file=None, paras_diff: OrderedDict = None):
+    def run_npt(self, ppf_file=None, paras_diff: OrderedDict = None) -> [str]:
         cd_or_create_and_cd(self.dir_base_npt)
 
         if not os.path.exists('init.msd'):
@@ -128,6 +128,7 @@ class Target(Base):
 
         cd_or_create_and_cd(self.dir_iteration)
 
+        npt.msd = '_tmp.msd'
         shutil.copy('../init.msd', npt.msd)
         npt.export(ppf=ppf_file, minimize=True)
 
@@ -171,7 +172,12 @@ class Target(Base):
         commands.append('touch _finished_')
         npt.jobmanager.generate_sh(os.getcwd(), commands,
                                    name='NPT-%s-%i-%i' % (self.name, self.T, self.task.iteration))
-        npt.run()
+
+        if npt.jobmanager.queue != 'gtx':
+            npt.run()
+            return []
+        else:
+            return commands
 
     def get_npt_result(self, iteration=None) -> (float, float):
         if iteration is None:

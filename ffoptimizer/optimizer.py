@@ -21,7 +21,7 @@ class Optimizer():
         self.db.conn()
         self.CWD = os.getcwd()
 
-    def init_task(self, task_name, data_file, ppf_file, cwd):
+    def init_task(self, task_name, data_file, ppf_file, work_dir):
         task = self.db.session.query(Task).filter(Task.name == task_name).first()
         if task is not None:
             print('Error: Task %s already exist' % task_name)
@@ -29,7 +29,7 @@ class Optimizer():
 
         task = Task()
         task.name = task_name
-        task.cwd = os.path.abspath(cwd)
+        task.cwd = os.path.abspath(work_dir)
         ppf = PPF(ppf_file)
         task.ppf = str(ppf)
 
@@ -62,6 +62,30 @@ class Optimizer():
             self.db.session.rollback()
             raise
 
+    def list_task(self):
+        for task in self.db.session.query(Task):
+            print(task.name, task.dir)
+
+    def reset_task(self, task_name):
+        task = self.db.session.query(Task).filter(Task.name == task_name).first()
+        if task is None:
+            print('Error: Task %s not exist' % task_name)
+            sys.exit(0)
+
+        for target in task.targets:
+            files = os.listdir(target.dir_base_npt)
+            for filename in files:
+                filepath = os.path.join(target.dir_base_npt, filename)
+                if os.path.isdir(filepath) and not filepath.endswith('-1'):
+                    try:
+                        shutil.rmtree(filepath)
+                    except Exception as e:
+                        print(str(e))
+
+        task.results.delete()
+        task.iteration = 0
+        self.db.session.commit()
+
     def remove_task(self, task_name):
         task = self.db.session.query(Task).filter(Task.name == task_name).first()
         if task is None:
@@ -77,10 +101,6 @@ class Optimizer():
         task.results.delete()
         self.db.session.delete(task)
         self.db.session.commit()
-
-    def list_task(self):
-        for task in self.db.session.query(Task):
-            print(task.name, task.dir)
 
     def optimize(self, task_name, wExpansivity=0, qmd=None, msd=None, torsion=None):
         task = self.db.session.query(Task).filter(Task.name == task_name).first()
@@ -125,9 +145,29 @@ class Optimizer():
             ppf.write(ppf_out)
 
             if not task.npt_started():
+                ### save gtx_dirs and gtx_cmds for running jobs on gtx queue
+                gtx_dirs = []
+                gtx_cmds = []
+                ###
                 for target in task.targets:
-                    target.run_npt(ppf_out, paras)
-            os.chdir(self.CWD)
+                    cmds = target.run_npt(ppf_out, paras)
+                    ### save gtx_dirs and gtx_cmds for running jobs on gtx queue
+                    if cmds != []:
+                        gtx_dirs.append(target.dir_iteration)
+                        gtx_cmds = cmds
+
+                os.chdir(self.CWD)
+
+                if gtx_dirs != []:
+                    from .models import npt
+                    commands_list = npt.gmx.generate_gmx_multidir_cmds(gtx_dirs, gtx_cmds)
+                    npt.jobmanager.queue = 'gtx'
+                    npt.jobmanager.nprocs = '2'
+                    for i, commands in enumerate(commands_list):
+                        sh = os.path.join(task.dir, '_job.multi-%i.sh' % i)
+                        npt.jobmanager.generate_sh(task.dir, commands, name='NPT-GTX-%i-%i' % (task.iteration, i),
+                                                   sh=sh)
+                        npt.jobmanager.submit(sh)
 
             while True:
                 if task.npt_finished():
