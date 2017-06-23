@@ -17,9 +17,8 @@ if __name__ == '__main__':
                             sys.argv[5])  # task_name, data_file, ppf_file, work_dir
 
     elif cmd == 'optimize':
-        task_name = sys.argv[2]
-        # optimizer.optimize(ppf_file, 0.15)
-        optimizer.optimize(task_name, 0.15, 'MP2-C6.qmd', 'C6.msd', 'TORS C5 C8 C11 C14 500.0 180.0 10.0 18')
+        #optimizer.optimize(task_name=sys.argv[2], wExpansivity=0)
+        optimizer.optimize(task_name=sys.argv[2], wExpansivity=0.15, qmd='MP2-C6.qmd', msd='C6.msd', torsion='TORS C5 C8 C11 C14 500.0 180.0 10.0 18')
 
     elif cmd == 'remove':
         optimizer.remove_task(sys.argv[2])

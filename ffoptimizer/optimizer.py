@@ -70,10 +70,11 @@ class Optimizer():
 
         try:
             shutil.rmtree(task.dir)
-        except:
-            raise
+        except Exception as e:
+            print(str(e))
 
-        self.db.session.query(Target).filter(Target.task == task).delete()
+        task.targets.delete()
+        task.results.delete()
         self.db.session.delete(task)
         self.db.session.commit()
 
@@ -81,7 +82,7 @@ class Optimizer():
         for task in self.db.session.query(Task):
             print(task.name, task.dir)
 
-    def optimize(self, task_name, wExpansivity, qmd=None, msd=None, torsion=None):
+    def optimize(self, task_name, wExpansivity=0, qmd=None, msd=None, torsion=None):
         task = self.db.session.query(Task).filter(Task.name == task_name).first()
         if task is None:
             print('Error: Task %s not exist' % task_name)
@@ -138,7 +139,6 @@ class Optimizer():
 
             R_dens = []
             R_hvap = []
-            R_expa = []
             targets = task.targets.all()
             for target in targets:
                 dens, hvap = target.get_npt_result()
@@ -147,27 +147,31 @@ class Optimizer():
             os.chdir(self.CWD)
 
             ### thermal expansivity
-            for i_mol in range(len(targets) // 2):
-                target_T1 = targets[2 * i_mol]
-                target_T2 = targets[2 * i_mol + 1]
-                res_Kt = ((target_T1.sim_dens - target_T2.sim_dens) / (target_T1.density - target_T2.density) - 1) \
-                         * 100 * wExpansivity
-                R_expa.append(res_Kt)
+            if wExpansivity != 0:
+                R_expa = []
+                for i_mol in range(len(targets) // 2):
+                    target_T1 = targets[2 * i_mol]
+                    target_T2 = targets[2 * i_mol + 1]
+                    res_Kt = ((target_T1.sim_dens - target_T2.sim_dens) / (target_T1.density - target_T2.density) - 1) \
+                             * 100 * wExpansivity
+                    R_expa.append(res_Kt)
 
-            R = R_dens + R_hvap + R_expa
+                R = R_dens + R_hvap + R_expa
+            else:
+                R = R_dens + R_hvap
 
             ### save result to database
             result = Result(task=task)
             result.iteration = task.iteration
-            result.ppf = ppf
+            result.ppf = str(ppf)
             result.parameter = str(params)
             result.residual = json.dumps(R)
+            self.db.session.add(result)
             self.db.session.commit()
             ###
 
             ### write current parameters and residual to log
-            txt = '\nITERATION: %i\n' % task.iteration
-            txt += '\nRSQ: %.2f\n' % np.sum(list(map(lambda x: x ** 2, R)))
+            txt = '\nITERATION %i, RSQ %.2f\n' % (task.iteration, np.sum(list(map(lambda x: x ** 2, R))))
             txt += '\nPARAMETERS:\n'
             for k, v in params.items():
                 txt += '%10.5f  %s\n' % (v.value, k)
@@ -176,17 +180,19 @@ class Optimizer():
                 target = targets[i]
                 prop = 'density'
                 weight = target.wDens
-                txt += '%8.2f %10s %8.2f %8.2f %s\n' % (r, prop, weight, r / weight, target.name)
+                txt += '%8.2f %10s %8.2f %8.2f %% %s\n' % (r, prop, weight, r / weight, target.name)
             for i, r in enumerate(R_hvap):
                 target = targets[i]
                 prop = 'hvap'
                 weight = target.wHvap
-                txt += '%8.2f %10s %8.2f %8.2f %s\n' % (r, prop, weight, r / weight, target.name)
-            for i, r in enumerate(R_expa):
-                target = targets[i * 2]
-                prop = 'expan'
-                weight = wExpansivity
-                txt += '%8.2f %10s %8.2f %8.2f %s\n' % (r, prop, weight, r / weight, target.name)
+                txt += '%8.2f %10s %8.2f %8.2f %% %s\n' % (r, prop, weight, r / weight, target.name)
+
+            if wExpansivity != 0:
+                for i, r in enumerate(R_expa):
+                    target = targets[i * 2]
+                    prop = 'expan'
+                    weight = wExpansivity
+                    txt += '%8.2f %10s %8.2f %8.2f %% %s\n' % (r, prop, weight, r / weight, target.name)
 
             print(txt)
             with open(LOG, 'a') as log:
@@ -214,7 +220,6 @@ class Optimizer():
 
             J_dens = []
             J_hvap = []
-            J_expa = []
             targets = task.targets.all()
             for target in targets:
                 dDdp_list, dHdp_list = target.get_dDens_dHvap_list_from_paras(paras)
@@ -223,14 +228,18 @@ class Optimizer():
             os.chdir(self.CWD)
 
             ### thermal expansivity
-            for i_mol in range(len(targets) // 2):
-                target_T1 = targets[2 * i_mol]
-                target_T2 = targets[2 * i_mol + 1]
-                dExpa = (target_T1.dDdp_array - target_T2.dDdp_array) / (target_T1.density - target_T2.density) \
-                        * 100 * wExpansivity
-                J_expa.append(list(dExpa))
+            if wExpansivity != 0:
+                J_expa = []
+                for i_mol in range(len(targets) // 2):
+                    target_T1 = targets[2 * i_mol]
+                    target_T2 = targets[2 * i_mol + 1]
+                    dExpa = (target_T1.dDdp_array - target_T2.dDdp_array) / (target_T1.density - target_T2.density) \
+                            * 100 * wExpansivity
+                    J_expa.append(list(dExpa))
 
-            J = J_dens + J_hvap + J_expa
+                J = J_dens + J_hvap + J_expa
+            else:
+                J = J_dens + J_hvap
 
             ### save result to database
             result = self.db.session.query(Result).filter(
@@ -260,12 +269,14 @@ class Optimizer():
                 for item in row:
                     txt += '%10.2f' % item
                 txt += ' %10s %s\n' % (prop, name)
-            for i, row in enumerate(J_expa):
-                name = targets[2 * i].name
-                prop = 'expan'
-                for item in row:
-                    txt += '%10.2f' % item
-                txt += ' %10s %s\n' % (prop, name)
+
+            if wExpansivity != 0:
+                for i, row in enumerate(J_expa):
+                    name = targets[2 * i].name
+                    prop = 'expan'
+                    for item in row:
+                        txt += '%10.2f' % item
+                    txt += ' %10s %s\n' % (prop, name)
 
             print(txt)
             with open(LOG, 'a') as log:
@@ -355,7 +366,7 @@ class Optimizer():
                 else:
                     marker = 'o'
                 pylab.plot(prop['T'], points, marker, label=i)
-            y_mean = np.mean(prop['hvap'])
+            y_mean = np.mean(prop['hvap']['expt'])
             pylab.ylim(y_mean - 20, y_mean + 20)
             pylab.legend()
             pylab.title('HVap %s %s (kJ/mol)' % (name, prop['smiles']))

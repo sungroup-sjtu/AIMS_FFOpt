@@ -17,13 +17,14 @@ class MacConfig():
 class ClusterConfig():
     DFF_ROOT = '/share/apps/dff/msdserver'
     PACKMOL_BIN = '/share/apps/tools/packmol'
-    GMX_BIN = '/share/apps/gromacs/2016.3-static-compatible/bin/gmx'
+    GMX_BIN = '/share/apps/gromacs/2016.3-msdserver/bin/gmx_gpu'
 
     MS_TOOLS_DIR = '/home/msdserver/msd-server'
     WORK_DIR = '/share/workspace/msdserver/MSDServer/'
 
     JOB_MANAGER = 'torque'
-    QUEUE_DICT = OrderedDict([('cpu', 16), ('fast', 12)])
+    #QUEUE_DICT = OrderedDict([('cpu', 16), ('fast', 12)])
+    QUEUE_DICT = OrderedDict([('cpu', 16)])
 
 
 class PiConfig():

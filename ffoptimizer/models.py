@@ -175,7 +175,7 @@ class Target(Base):
 
     def get_npt_result(self, iteration=None) -> (float, float):
         if iteration is None:
-            iteration = self.iteration
+            iteration = self.task.iteration
         os.chdir(self.dir_base_npt)
         os.chdir('%i-%i-%i' % (self.T, self.P, iteration))
         print(os.getcwd())
