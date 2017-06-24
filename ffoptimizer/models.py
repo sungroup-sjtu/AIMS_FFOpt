@@ -107,7 +107,7 @@ class Target(Base):
         return os.path.join(self.task.dir, 'NPT-%s' % (self.name))
 
     @property
-    def dir_iteration(self):
+    def dir(self):
         return os.path.join(self.dir_base_npt, '%i-%i-%i' % (self.T, self.P, self.task.iteration))
 
     def run_npt(self, ppf_file=None, paras_diff: OrderedDict = None) -> [str]:
@@ -126,7 +126,7 @@ class Target(Base):
             print('Create box using DFF ...')
             npt.dff.build_box_after_packmol([mol2], [self.n_mol], 'init.msd', mol_corr='init.pdb', length=length)
 
-        cd_or_create_and_cd(self.dir_iteration)
+        cd_or_create_and_cd(self.dir)
 
         npt.msd = '_tmp.msd'
         shutil.copy('../init.msd', npt.msd)
