@@ -102,7 +102,7 @@ class Optimizer():
         self.db.session.delete(task)
         self.db.session.commit()
 
-    def optimize(self, task_name, wExpansivity=0, qmd=None, msd=None, torsion=None):
+    def optimize(self, task_name, penalty=None, wExpansivity=0, qmd=None, msd=None, torsion=None):
         task = self.db.session.query(Task).filter(Task.name == task_name).first()
         if task is None:
             print('Error: Task %s not exist' % task_name)
@@ -153,7 +153,7 @@ class Optimizer():
                     cmds = target.run_npt(ppf_out, paras)
                     ### save gtx_dirs and gtx_cmds for running jobs on gtx queue
                     if cmds != []:
-                        gtx_dirs.append(target.dir_iteration)
+                        gtx_dirs.append(target.dir)
                         gtx_cmds = cmds
 
                 os.chdir(self.CWD)
@@ -185,6 +185,7 @@ class Optimizer():
                 dens, hvap = target.get_npt_result()
                 R_dens.append((dens - target.density) / target.density * 100 * target.wDens)  # deviation  percent
                 R_hvap.append((hvap - target.hvap) / target.hvap * 100 * target.wHvap)  # deviation percent
+            R = R_dens + R_hvap
             os.chdir(self.CWD)
 
             ### thermal expansivity
@@ -197,9 +198,18 @@ class Optimizer():
                              * 100 * wExpansivity
                     R_expa.append(res_Kt)
 
-                R = R_dens + R_hvap + R_expa
-            else:
-                R = R_dens + R_hvap
+                R += R_expa
+
+            # parameter penalty
+            if penalty is not None:
+                R_pena = []
+                for k, v in params.items():
+                    if k[-2:] in penalty.keys():
+                        res = (v.value - adj_nb_paras[k]) / adj_nb_paras[k]
+                    else:
+                        res = 0
+                    R_pena.append(res * penalty[k[-2:]] * np.sqrt(len(R_dens)))
+                R += R_pena
 
             ### save result to database
             result = Result(task=task)
@@ -228,7 +238,7 @@ class Optimizer():
                 target = targets[i]
                 prop = 'hvap'
                 weight = target.wHvap
-                txt += '%8.2f %8s %8.2f %% %8.2f %8.2f %s %s\n' \
+                txt += '%8.2f %8s %8.2f %% %8.1f %8.2f %s %s\n' \
                        % (r, prop, r / weight, target.hvap, weight, target.name, target.smiles)
 
             if wExpansivity != 0:
@@ -238,6 +248,11 @@ class Optimizer():
                     weight = wExpansivity
                     txt += '%8.2f %8s %8.2f %% %8s %8.2f %s %s\n' \
                            % (r, prop, r / weight, '', weight, target.name, target.smiles)
+
+            if penalty is not None:
+                for i, r in enumerate(R_pena):
+                    prop = 'penalty'
+                    txt += '%8.2f %8s %s\n' % (r, prop, list(params.keys())[i])
 
             print(txt)
             with open(LOG, 'a') as log:
@@ -270,6 +285,7 @@ class Optimizer():
                 dDdp_list, dHdp_list = target.get_dDens_dHvap_list_from_paras(paras)
                 J_dens.append([i / target.density * 100 * target.wDens for i in dDdp_list])  # deviation  percent
                 J_hvap.append([i / target.hvap * 100 * target.wHvap for i in dHdp_list])  # deviation  percent
+            J = J_dens + J_hvap
             os.chdir(self.CWD)
 
             ### thermal expansivity
@@ -282,9 +298,19 @@ class Optimizer():
                             * 100 * wExpansivity
                     J_expa.append(list(dExpa))
 
-                J = J_dens + J_hvap + J_expa
-            else:
-                J = J_dens + J_hvap
+                J += J_expa
+
+            ### parameter penalty
+            if penalty is not None:
+                J_pena = []
+                for k, v in params.items():
+                    if k[-2:] in penalty.keys():
+                        d = 1 / adj_nb_paras[k]
+                    else:
+                        d = 0
+                    J_pena.append(d * penalty[k[-2:]] * np.sqrt(len(J_dens)))
+                J_pena = [list(a) for a in np.diag(J_pena)] # convert list to diagonal matrix
+                J += J_pena
 
             ### save result to database
             result = self.db.session.query(Result).filter(
@@ -300,19 +326,19 @@ class Optimizer():
             ### write Jacobian to log
             txt = '\nJACOBIAN MATRIX:\n'
             for k in params.keys():
-                txt += '%10s' % k
+                txt += '%11s' % k
             txt += '\n'
             for i, row in enumerate(J_dens):
                 name = targets[i].name
                 prop = 'density'
                 for item in row:
-                    txt += '%10.2f' % item
+                    txt += '%11.2f' % item
                 txt += ' %10s %s\n' % (prop, name)
             for i, row in enumerate(J_hvap):
                 name = targets[i].name
                 prop = 'hvap'
                 for item in row:
-                    txt += '%10.2f' % item
+                    txt += '%11.2f' % item
                 txt += ' %10s %s\n' % (prop, name)
 
             if wExpansivity != 0:
@@ -320,8 +346,16 @@ class Optimizer():
                     name = targets[2 * i].name
                     prop = 'expan'
                     for item in row:
-                        txt += '%10.2f' % item
-                    txt += ' %10s %s\n' % (prop, name)
+                        txt += '%11.2f' % item
+                    txt += ' %8s %s\n' % (prop, name)
+
+            if penalty is not None:
+                for i, row in enumerate(J_pena):
+                    name = list(params.keys())[i]
+                    prop = 'penalty'
+                    for item in row:
+                        txt += '%11.2f' % item
+                    txt += ' %8s %s\n' % (prop, name)
 
             print(txt)
             with open(LOG, 'a') as log:
@@ -335,8 +369,9 @@ class Optimizer():
             time.sleep(3)
 
         ppf = PPF(string=task.ppf)
+        adj_nb_paras = ppf.get_adj_nb_paras()
         params = Parameters()
-        for k, v in ppf.get_adj_nb_paras().items():
+        for k, v in adj_nb_paras.items():
             bound = PPF.get_bound_for_para(k)
             params.add(k, value=v, min=bound[0], max=bound[1])
 

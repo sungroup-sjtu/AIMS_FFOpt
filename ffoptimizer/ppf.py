@@ -144,21 +144,11 @@ class PPF():
     @staticmethod
     def get_bound_for_para(key):
         if key.endswith('r0'):
-            if key.startswith('c'):
-                bound = (3, 5)
-            elif key.startswith('h'):
-                bound = (2, 4)
-            else:
-                bound = (2, 5)
+            bound = (2, 5)
         elif key.endswith('e0'):
-            if key.startswith('c'):
-                bound = (0.02, 0.12)
-            elif key.startswith('h'):
-                bound = (0.005, 0.1)
-            else:
-                bound = (0.005, 0.12)
+            bound = (0.01, 0.5)
         elif key.endswith('bi'):
-            bound = (-0.2, 0)
+            bound = (-0.5, 0.5)
         else:
             raise Exception('Unknown parameter: ' + key)
 

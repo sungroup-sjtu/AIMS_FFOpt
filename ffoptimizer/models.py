@@ -144,7 +144,7 @@ class Target(Base):
             commands.append('export GMX_MAXCONSTRWARN=-1')
             for k in paras_diff.keys():
                 for i in [-1, 1]:
-                    basename = 'diff-%s.%i' % (k, i)
+                    basename = 'diff%i.%s' % (i, k)
                     top_out = basename + '.top'
                     top_out_hvap = basename + '-hvap.top'
 
@@ -197,7 +197,7 @@ class Target(Base):
 
     def get_dDens_dHvap_list_from_paras(self, paras: OrderedDict):
         # read density and Hvap list
-        os.chdir(self.dir_iteration)
+        os.chdir(self.dir)
 
         df = panedr.edr_to_df('npt.edr')
         self.dens_series_npt: Series = df.Density / 1000  # convert to g/mL
@@ -215,19 +215,19 @@ class Target(Base):
         return dDdp_list, dHdp_list
 
     def get_dDens_dHvap_from_para(self, k) -> (float, float):
-        os.chdir(self.dir_iteration)
+        os.chdir(self.dir)
 
         # energy and Hvap after diff
-        df = panedr.edr_to_df('diff-%s.1.edr' % k)
+        df = panedr.edr_to_df('diff1.%s.edr' % k)
         pene_array_diff_p = np.array(df.Potential)
 
-        df = panedr.edr_to_df('diff-%s.1-hvap.edr' % k)
+        df = panedr.edr_to_df('diff1.%s-hvap.edr' % k)
         hvap_array_diff_p = np.array(self.RT - df.Potential / self.n_mol)
 
-        df = panedr.edr_to_df('diff-%s.-1.edr' % k)
+        df = panedr.edr_to_df('diff-1.%s.edr' % k)
         pene_array_diff_n = np.array(df.Potential)
 
-        df = panedr.edr_to_df('diff-%s.-1-hvap.edr' % k)
+        df = panedr.edr_to_df('diff-1.%s-hvap.edr' % k)
         hvap_array_diff_n = np.array(self.RT - df.Potential / self.n_mol)
 
         # calculate the derivative series dA/dp
@@ -251,22 +251,22 @@ class Target(Base):
         return dDdp, dHdp
 
     def npt_finished(self) -> bool:
-        log_finished = os.path.join(self.dir_iteration, '_finished_')
+        log_finished = os.path.join(self.dir, '_finished_')
         if os.path.exists(log_finished):
             return True
 
         return False
 
     def npt_started(self) -> bool:
-        log_started = os.path.join(self.dir_iteration, '_started_')
+        log_started = os.path.join(self.dir, '_started_')
         if os.path.exists(log_started):
             return True
 
         return False
 
     def clear_npt_result(self):
-        log_started = os.path.join(self.dir_iteration, '_started_')
-        log_finished = os.path.join(self.dir_iteration, '_finished_')
+        log_started = os.path.join(self.dir, '_started_')
+        log_finished = os.path.join(self.dir, '_finished_')
         try:
             os.remove(log_started)
             os.remove(log_finished)

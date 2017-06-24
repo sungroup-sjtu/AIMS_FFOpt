@@ -29,6 +29,7 @@ if __name__ == '__main__':
     elif cmd == 'optimize':
         # optimizer.optimize(task_name=sys.argv[2], wExpansivity=0)
         optimizer.optimize(task_name=sys.argv[2],
+                           penalty={'r0': 1, 'e0': 1},
                            wExpansivity=0.15,
                            qmd='MP2-C6.qmd',
                            msd='C6.msd',
