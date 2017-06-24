@@ -138,7 +138,7 @@ class Optimizer():
             ppf.set_nb_paras(paras)
 
             if torsion is not None:
-                print('Fit torsion based on new non-bonded parameters...')
+                print('Fit torsion based on new non-bonded parameters ...')
                 ppf.fit_torsion(qmd, msd, torsion)
 
             ppf_out = os.path.join(self.CWD, '%s-%i.ppf' % (task.name, task.iteration))
@@ -167,7 +167,6 @@ class Optimizer():
                         sh = os.path.join(task.dir, '_job.multi-%i.sh' % i)
                         npt.jobmanager.generate_sh(task.dir, commands, name='NPT-GTX-%i-%i' % (task.iteration, i),
                                                    sh=sh)
-                        time.sleep(3)
                         npt.jobmanager.submit(sh)
 
             while True:
@@ -252,7 +251,7 @@ class Optimizer():
             if penalty is not None:
                 for i, r in enumerate(R_pena):
                     prop = 'penalty'
-                    txt += '%8.2f %8s %s\n' % (r, prop, list(params.keys())[i])
+                    txt += '%8.2f %8s %10s\n' % (r, prop, list(params.keys())[i])
 
             print(txt)
             with open(LOG, 'a') as log:
@@ -326,27 +325,27 @@ class Optimizer():
             ### write Jacobian to log
             txt = '\nJACOBIAN MATRIX:\n'
             for k in params.keys():
-                txt += '%11s' % k
+                txt += '%10s' % k
             txt += '\n'
             for i, row in enumerate(J_dens):
                 name = targets[i].name
                 prop = 'density'
                 for item in row:
-                    txt += '%11.2f' % item
-                txt += ' %10s %s\n' % (prop, name)
+                    txt += '%10.2f' % item
+                txt += ' %8s %s\n' % (prop, name)
             for i, row in enumerate(J_hvap):
                 name = targets[i].name
                 prop = 'hvap'
                 for item in row:
-                    txt += '%11.2f' % item
-                txt += ' %10s %s\n' % (prop, name)
+                    txt += '%10.2f' % item
+                txt += ' %8s %s\n' % (prop, name)
 
             if wExpansivity != 0:
                 for i, row in enumerate(J_expa):
                     name = targets[2 * i].name
                     prop = 'expan'
                     for item in row:
-                        txt += '%11.2f' % item
+                        txt += '%10.2f' % item
                     txt += ' %8s %s\n' % (prop, name)
 
             if penalty is not None:
@@ -354,7 +353,7 @@ class Optimizer():
                     name = list(params.keys())[i]
                     prop = 'penalty'
                     for item in row:
-                        txt += '%11.2f' % item
+                        txt += '%10.2f' % item
                     txt += ' %8s %s\n' % (prop, name)
 
             print(txt)
