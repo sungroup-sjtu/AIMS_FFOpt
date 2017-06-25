@@ -35,11 +35,11 @@ for smiles, info in expt_data.items():
     t_max = int(math.floor(float(paras[1])))
     t_mid = int(math.ceil((t_min + t_max) / 2))
     dt = t_max - t_min
-    if dt <= 20:
-        print('%s: dt <= 20 not good' % name)
+    if dt <= 50:
+        print('%s: dt <= 50 not good' % name)
         t_list = [t_min, t_max]
     else:
-        t_list = [t_min + 10, t_max - 10]
+        t_list = [t_min + 25, t_max - 25]
 
     if abs(t_min - 298) > abs(t_max - 298):
         weight = [1, 2]

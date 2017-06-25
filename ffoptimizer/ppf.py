@@ -144,9 +144,15 @@ class PPF():
     @staticmethod
     def get_bound_for_para(key):
         if key.endswith('r0'):
-            bound = (2, 5)
+            bound = (3, 5)
+            if key.startswith('h'):
+                bound = (2, 3)
         elif key.endswith('e0'):
             bound = (0.01, 0.5)
+            if key.startswith('h'):
+                bound = (0.01, 0.1)
+            if key.startswith('c'):
+                bound = (0.01, 0.1)
         elif key.endswith('bi'):
             bound = (-0.5, 0.5)
         else:
