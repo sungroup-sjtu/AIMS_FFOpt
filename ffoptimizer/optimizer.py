@@ -102,7 +102,7 @@ class Optimizer():
         self.db.session.delete(task)
         self.db.session.commit()
 
-    def optimize(self, task_name, penalty=None, wExpansivity=0, qmd=None, msd=None, torsion=None):
+    def optimize(self, task_name, power_residual=1, wExpansivity=0, qmd=None, msd=None, torsion=None):
         task = self.db.session.query(Task).filter(Task.name == task_name).first()
         if task is None:
             print('Error: Task %s not exist' % task_name)
@@ -113,6 +113,8 @@ class Optimizer():
             sys.exit(0)
 
         LOG = os.path.join(self.CWD, '%s.log' % task_name)
+
+        self.R = []
 
         def residual(params: Parameters):
             ### if result exist in database, ignore calculation
@@ -200,15 +202,12 @@ class Optimizer():
                 R += R_expa
 
             # parameter penalty
-            if penalty is not None:
-                R_pena = []
-                for k, v in params.items():
-                    if k[-2:] in penalty.keys():
-                        res = (v.value - adj_nb_paras[k]) / adj_nb_paras[k]
-                    else:
-                        res = 0
-                    R_pena.append(res * penalty[k[-2:]] * np.sqrt(len(R_dens)))
-                R += R_pena
+            R_pena = []
+            for k, v in params.items():
+                res = (v.value - adj_nb_paras[k]) / adj_nb_paras[k]
+                penalty = PPF.get_penalty_for_para(k)
+                R_pena.append(res * penalty * np.sqrt(len(R_dens)))
+            R += R_pena
 
             ### save result to database
             result = Result(task=task)
@@ -248,17 +247,20 @@ class Optimizer():
                     txt += '%8.2f %8s %8.2f %% %8s %8.2f %s %s\n' \
                            % (r, prop, r / weight, '', weight, target.name, target.smiles)
 
-            if penalty is not None:
-                for i, r in enumerate(R_pena):
-                    prop = 'penalty'
-                    txt += '%8.2f %8s %10s\n' % (r, prop, list(params.keys())[i])
+            for i, r in enumerate(R_pena):
+                prop = 'penalty'
+                txt += '%8.2f %8s %10s\n' % (r, prop, list(params.keys())[i])
 
             print(txt)
             with open(LOG, 'a') as log:
                 log.write(txt)
             ###
 
-            return R
+            # return R
+
+            self.R = R
+            new_R = [r ** power_residual for r in R]
+            return new_R
 
         def jacobian(params: Parameters):
             ### if result exist in database, ignore calculation
@@ -300,16 +302,13 @@ class Optimizer():
                 J += J_expa
 
             ### parameter penalty
-            if penalty is not None:
-                J_pena = []
-                for k, v in params.items():
-                    if k[-2:] in penalty.keys():
-                        d = 1 / adj_nb_paras[k]
-                    else:
-                        d = 0
-                    J_pena.append(d * penalty[k[-2:]] * np.sqrt(len(J_dens)))
-                J_pena = [list(a) for a in np.diag(J_pena)] # convert list to diagonal matrix
-                J += J_pena
+            J_pena = []
+            for k, v in params.items():
+                d = 1 / adj_nb_paras[k]
+                penalty = PPF.get_penalty_for_para(k)
+                J_pena.append(d * penalty * np.sqrt(len(J_dens)))
+            J_pena = [list(a) for a in np.diag(J_pena)]  # convert list to diagonal matrix
+            J += J_pena
 
             ### save result to database
             result = self.db.session.query(Result).filter(
@@ -348,20 +347,24 @@ class Optimizer():
                         txt += '%10.2f' % item
                     txt += ' %8s %s\n' % (prop, name)
 
-            if penalty is not None:
-                for i, row in enumerate(J_pena):
-                    name = list(params.keys())[i]
-                    prop = 'penalty'
-                    for item in row:
-                        txt += '%10.2f' % item
-                    txt += ' %8s %s\n' % (prop, name)
+            for i, row in enumerate(J_pena):
+                name = list(params.keys())[i]
+                prop = 'penalty'
+                for item in row:
+                    txt += '%10.2f' % item
+                txt += ' %8s %s\n' % (prop, name)
 
             print(txt)
             with open(LOG, 'a') as log:
                 log.write(txt)
             ###
 
-            return J
+            # return J
+
+            new_J = []
+            for i, j_list in enumerate(J):
+                new_J.append([power_residual * self.R[i] ** (power_residual - 1) * j for j in j_list])
+            return new_J
 
         def callback(params: Parameters, iter: int, res: [float]):
             print('Wait for 3 seconds ...')
