@@ -29,8 +29,8 @@ if __name__ == '__main__':
     elif cmd == 'optimize':
         # optimizer.optimize(task_name=sys.argv[2], wExpansivity=0)
         optimizer.optimize(task_name=sys.argv[2],
-                           power_residual=2,
-                           wExpansivity=0.10,
+                           power_residual=1,
+                           wExpansivity=0.01,
                            qmd='C6-MP2.qmd',
                            msd='C6.msd',
                            torsion='TORS C5 C8 C11 C14 500.0 180.0 10.0 18')

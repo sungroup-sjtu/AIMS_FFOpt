@@ -154,7 +154,7 @@ class PPF():
             if key.startswith('c'):
                 bound = (0.01, 0.1)
         elif key.endswith('bi'):
-            bound = (-0.5, 0.5)
+            bound = (-0.6, 0.6)
         else:
             raise Exception('Unknown parameter: ' + key)
 
@@ -163,7 +163,7 @@ class PPF():
     @staticmethod
     def get_penalty_for_para(key):
         if key.endswith('r0'):
-            penalty = 10
+            penalty = 5
         elif key.endswith('e0'):
             penalty = 1
         elif key.endswith('bi'):

@@ -30,26 +30,18 @@ for smiles, info in expt_data.items():
     name = info['name']
     paras = info['paras']
 
-
     t_min = int(math.ceil(float(paras[0])))
     t_max = int(math.floor(float(paras[1])))
     t_mid = int(math.ceil((t_min + t_max) / 2))
     dt = t_max - t_min
-    if dt <= 50:
-        print('%s: dt <= 50 not good' % name)
+
+    t_list = [t_mid - 50, t_mid + 50]
+    if dt < 100:
+        print('# %s: dt < 100, not good' % name)
+        t_list = [t_mid - 25, t_mid + 25]
+    elif dt < 50:
+        print('# %s: dt < 50, not good' % name)
         t_list = [t_min, t_max]
-    else:
-        t_list = [t_min + 25, t_max - 25]
-
-    if abs(t_min - 298) > abs(t_max - 298):
-        weight = [1, 2]
-    elif abs(t_min - 298) < abs(t_max - 298):
-        weight = [2, 1]
-    else:
-        weight = [1.5, 1.5]
-
-    #t_list = [t_min + 5, t_mid, t_max - 5]
-    #t_list = list(range(t_min, t_max+1, int(dt / 4)))
 
     exp_density = []
     exp_hvap = []
@@ -65,8 +57,9 @@ for smiles, info in expt_data.items():
         exp_hvap.append(val)
 
     for i, t in enumerate(t_list):
-        # wDensity = math.exp(-abs(t-298)/200) + 1
         wDensity = 1
         wHvap = 0.2
+        #if i % 2 == 0:
+            #wHvap = 0.1
         print('%-10s %-40s %4i %4i %8.3f %8.2f %8.1f %8.2f' %(name, smiles, t, 1, exp_density[i], wDensity, exp_hvap[i], wHvap))
 

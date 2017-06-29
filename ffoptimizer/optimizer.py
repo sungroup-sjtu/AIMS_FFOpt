@@ -131,6 +131,7 @@ class Optimizer():
 
             ### new iteration
             task.iteration += 1
+            self.db.session.commit()
 
             ### save ppf file and run NPT
             ppf = PPF(string=task.ppf)
@@ -256,11 +257,11 @@ class Optimizer():
                 log.write(txt)
             ###
 
-            # return R
+            return R
 
-            self.R = R
-            new_R = [r ** power_residual for r in R]
-            return new_R
+            # self.R = R
+            # new_R = [r ** power_residual for r in R]
+            # return new_R
 
         def jacobian(params: Parameters):
             ### if result exist in database, ignore calculation
@@ -359,12 +360,12 @@ class Optimizer():
                 log.write(txt)
             ###
 
-            # return J
+            return J
 
-            new_J = []
-            for i, j_list in enumerate(J):
-                new_J.append([power_residual * self.R[i] ** (power_residual - 1) * j for j in j_list])
-            return new_J
+            # new_J = []
+            # for i, j_list in enumerate(J):
+            #     new_J.append([power_residual * self.R[i] ** (power_residual - 1) * j for j in j_list])
+            # return new_J
 
         def callback(params: Parameters, iter: int, res: [float]):
             print('Wait for 3 seconds ...')
@@ -399,7 +400,7 @@ class Optimizer():
             iterations = (1, task.iteration)
 
         props = dict()
-        for target in self.db.session.query(Target).all():
+        for target in task.targets:
             mol = target.name
             if not mol in props.keys():
                 props[mol] = {'smiles': target.smiles,
@@ -429,7 +430,7 @@ class Optimizer():
             for i, points in prop['dens'].items():
                 if i == 'expt':
                     marker = '--'
-                elif i == 0:
+                elif i == 1:
                     marker = 'x'
                 else:
                     marker = 'o'
@@ -443,7 +444,7 @@ class Optimizer():
             for i, points in prop['hvap'].items():
                 if i == 'expt':
                     marker = '--'
-                elif i == 0:
+                elif i == 1:
                     marker = 'x'
                 else:
                     marker = 'o'
