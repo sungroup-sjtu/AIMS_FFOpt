@@ -104,29 +104,78 @@ class PPF():
         with open(ppf_out, 'w') as f:
             f.write(str(self))
 
-    def fit_torsion(self, qmd=None, msd=None, torsion=None):
+    def freeze_torsions(self):
+        terms = [''] * len(self.terms)
+        for i, term in enumerate(self.terms):
+            if not (term.startswith('TCOSP')):
+                terms[i] = term
+                continue
+            words = term.split(':')
+            words = [w.strip() for w in words]
+            a_types = words[1]
+            paras = words[2]
+            para_words = paras.split(',')
+            para_words = [w.strip() for w in para_words]
+            for k in range(len(para_words)):
+                para_word = para_words[k]
+                if not para_word.endswith('*'):
+                    para_words[k] += '*'
+            new_paras = ', '.join(para_words)
+            new_term = 'TCOSP: %s: %s:' % (a_types, new_paras)
+            terms[i] = new_term
+        self.terms = terms
+
+    def relax_torsion(self, torsion_key):
+        terms = [''] * len(self.terms)
+        for i, term in enumerate(self.terms):
+            if not (term.startswith('TCOSP')):
+                terms[i] = term
+                continue
+            words = term.split(':')
+            words = [w.strip() for w in words]
+            a_types = words[1]
+
+            a_type_words = a_types.split(',')
+            a_type_words = [w.strip() for w in a_type_words]
+
+            key_words = torsion_key.split(',')
+            key_words = [w.strip() for w in key_words]
+
+            if a_type_words == key_words or a_type_words == list(reversed(key_words)):
+                new_paras = '0*, 0.0, 3*, 0*, 0.0, 1*, 180*, 0.0, 2*'
+                new_term = 'TCOSP: %s: %s:' % (a_types, new_paras)
+                terms[i] = new_term
+            else:
+                terms[i] = term
+        self.terms = terms
+
+    def fit_torsion(self, qmd=None, msd=None, restraint=None, torsion_key=None):
         import os
         import random
         from mstools.wrapper import DFF
         from .config import Config
 
-        # Backup adj_nb_paras
+        ### relax only one torsion
+        self.freeze_torsions()
+        self.relax_torsion(torsion_key)
+
+        ### Backup adj_nb_paras
         adj_nb_paras = self.get_adj_nb_paras()
 
         dff = DFF(dff_root=Config.DFF_ROOT)
-        ppf_tmp = 'tmp-%i.ppf' % random.randint(1E7, 1E8)
-        ppf_tmp2 = 'tmp-%i.ppf' % random.randint(1E7, 1E8)
+        ppf_tmp = 'tmp-%i.ppf' % random.randint(1E5, 1E6)
+        ppf_tmp2 = 'tmp-%i.ppf' % random.randint(1E5, 1E6)
         self.write(ppf_tmp)
         try:
-            dff.fit_torsion(qmd, msd, ppf_tmp, ppf_tmp2, torsion)
-        except Exception as e:
-            print(str(e))
+            dff.fit_torsion(qmd, msd, ppf_tmp, ppf_tmp2, restraint)
+        except:
+            raise
         else:
             self.__init__(ppf_tmp2)
-            # restore adj_nb_paras
+            ### restore adj_nb_paras
             self.set_nb_paras(adj_nb_paras)
-        os.remove(ppf_tmp)
-        os.remove(ppf_tmp2)
+            # os.remove(ppf_tmp)
+            # os.remove(ppf_tmp2)
 
     @staticmethod
     def get_delta_for_para(key):

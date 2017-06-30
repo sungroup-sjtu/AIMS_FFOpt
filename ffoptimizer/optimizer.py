@@ -102,7 +102,7 @@ class Optimizer():
         self.db.session.delete(task)
         self.db.session.commit()
 
-    def optimize(self, task_name, power_residual=1, wExpansivity=0, qmd=None, msd=None, torsion=None):
+    def optimize(self, task_name, power_residual=1, wExpansivity=0, torsions=None):
         task = self.db.session.query(Task).filter(Task.name == task_name).first()
         if task is None:
             print('Error: Task %s not exist' % task_name)
@@ -129,10 +129,6 @@ class Optimizer():
                     return json.loads(R)
             ###
 
-            ### new iteration
-            task.iteration += 1
-            self.db.session.commit()
-
             ### save ppf file and run NPT
             ppf = PPF(string=task.ppf)
             paras = OrderedDict()
@@ -140,9 +136,17 @@ class Optimizer():
                 paras[k] = v.value
             ppf.set_nb_paras(paras)
 
-            if torsion is not None:
-                print('Fit torsion based on new non-bonded parameters ...')
-                ppf.fit_torsion(qmd, msd, torsion)
+            # TODO fit several torsions iteratively. More torsion to fit, more cycles. This is inefficient
+            if torsions is not None:
+                for i in range(len(torsions)):
+                    for torsion in torsions:
+                        print('Fit torsion based on new non-bonded parameters. Cycle %i ...' % i)
+                        print(torsion)
+                        ppf.fit_torsion(torsion[0], torsion[1], torsion[2], torsion[3])
+
+            ### new iteration
+            task.iteration += 1
+            self.db.session.commit()
 
             ppf_out = os.path.join(self.CWD, '%s-%i.ppf' % (task.name, task.iteration))
             ppf.write(ppf_out)

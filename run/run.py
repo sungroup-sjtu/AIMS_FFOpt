@@ -27,13 +27,12 @@ if __name__ == '__main__':
         optimizer.remove_task(sys.argv[2])
 
     elif cmd == 'optimize':
-        # optimizer.optimize(task_name=sys.argv[2], wExpansivity=0)
-        optimizer.optimize(task_name=sys.argv[2],
-                           power_residual=1,
-                           wExpansivity=0.01,
-                           qmd='C6-MP2.qmd',
-                           msd='C6.msd',
-                           torsion='TORS C5 C8 C11 C14 500.0 180.0 10.0 18')
+        torsions = [
+            ('C2-MP2.qmd', 'C2.msd', 'TORS H5 C1 C2 H6 500.0 60.0 15.0 12', 'h_1, c_4, c_4, h_1'),
+            ('C6-MP2.qmd', 'C6.msd', 'TORS C5 C8 C11 C14 500.0 180.0 10.0 18', 'c_4, c_4, c_4, c_4'),
+        ]
+
+        optimizer.optimize(task_name=sys.argv[2], wExpansivity=0.01, torsions=torsions)
 
     elif cmd == 'plot':
         iterations = None
