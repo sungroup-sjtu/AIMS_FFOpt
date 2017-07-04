@@ -174,8 +174,8 @@ class PPF():
             self.__init__(ppf_tmp2)
             ### restore adj_nb_paras
             self.set_nb_paras(adj_nb_paras)
-            # os.remove(ppf_tmp)
-            # os.remove(ppf_tmp2)
+            os.remove(ppf_tmp)
+            os.remove(ppf_tmp2)
 
     @staticmethod
     def get_delta_for_para(key):
@@ -212,9 +212,9 @@ class PPF():
     @staticmethod
     def get_penalty_for_para(key):
         if key.endswith('r0'):
-            penalty = 5
+            penalty = 2.5
         elif key.endswith('e0'):
-            penalty = 1
+            penalty = 0.5
         elif key.endswith('bi'):
             penalty = 0
         else:

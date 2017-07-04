@@ -140,7 +140,7 @@ class Optimizer():
             if torsions is not None:
                 for i in range(len(torsions)):
                     for torsion in torsions:
-                        print('Fit torsion based on new non-bonded parameters. Cycle %i ...' % i)
+                        print('Fit torsion based on new non-bonded parameters. Cycle %i / %i ...' % (i+1, len(torsions)))
                         print(torsion)
                         ppf.fit_torsion(torsion[0], torsion[1], torsion[2], torsion[3])
 
