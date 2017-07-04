@@ -32,7 +32,12 @@ if __name__ == '__main__':
             ('C6-MP2.qmd', 'C6.msd', 'TORS C5 C8 C11 C14 500.0 180.0 10.0 18', 'c_4, c_4, c_4, c_4'),
         ]
 
-        optimizer.optimize(task_name=sys.argv[2], wExpansivity=0.01, torsions=torsions)
+        optimizer.optimize(task_name=sys.argv[2],
+                           torsions=torsions,
+                           weight_expansivity=0.01,
+                           penalty_sigma=1,
+                           penalty_epsilon=0.2,
+                           penalty_charge=0)
 
     elif cmd == 'plot':
         iterations = None

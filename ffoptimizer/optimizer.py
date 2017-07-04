@@ -102,7 +102,8 @@ class Optimizer():
         self.db.session.delete(task)
         self.db.session.commit()
 
-    def optimize(self, task_name, power_residual=1, wExpansivity=0, torsions=None):
+    def optimize(self, task_name, power_residual=1, torsions=None,
+                 weight_expansivity=0, penalty_sigma=0, penalty_epsilon=0, penalty_charge=0):
         task = self.db.session.query(Task).filter(Task.name == task_name).first()
         if task is None:
             print('Error: Task %s not exist' % task_name)
@@ -115,6 +116,18 @@ class Optimizer():
         LOG = os.path.join(self.CWD, '%s.log' % task_name)
 
         self.R = []
+
+        def get_penalty_for_para(key):
+            if key.endswith('r0'):
+                penalty = penalty_sigma
+            elif key.endswith('e0'):
+                penalty = penalty_epsilon
+            elif key.endswith('bi'):
+                penalty = penalty_charge
+            else:
+                penalty = 0
+
+            return penalty
 
         def residual(params: Parameters):
             ### if result exist in database, ignore calculation
@@ -140,7 +153,8 @@ class Optimizer():
             if torsions is not None:
                 for i in range(len(torsions)):
                     for torsion in torsions:
-                        print('Fit torsion based on new non-bonded parameters. Cycle %i / %i ...' % (i+1, len(torsions)))
+                        print('Fit torsion based on new non-bonded parameters. Cycle %i / %i ...' % (
+                            i + 1, len(torsions)))
                         print(torsion)
                         ppf.fit_torsion(torsion[0], torsion[1], torsion[2], torsion[3])
 
@@ -195,13 +209,13 @@ class Optimizer():
             os.chdir(self.CWD)
 
             ### thermal expansivity
-            if wExpansivity != 0:
+            if weight_expansivity != 0:
                 R_expa = []
                 for i_mol in range(len(targets) // 2):
                     target_T1 = targets[2 * i_mol]
                     target_T2 = targets[2 * i_mol + 1]
                     res_Kt = ((target_T1.sim_dens - target_T2.sim_dens) / (target_T1.density - target_T2.density) - 1) \
-                             * 100 * wExpansivity
+                             * 100 * weight_expansivity
                     R_expa.append(res_Kt)
 
                 R += R_expa
@@ -209,8 +223,11 @@ class Optimizer():
             # parameter penalty
             R_pena = []
             for k, v in params.items():
-                res = (v.value - adj_nb_paras[k]) / adj_nb_paras[k]
-                penalty = PPF.get_penalty_for_para(k)
+                if k.endswith('bi'):
+                    res = v.value - adj_nb_paras[k]
+                else:
+                    res = (v.value - adj_nb_paras[k]) / adj_nb_paras[k]
+                penalty = get_penalty_for_para(k)
                 R_pena.append(res * penalty * np.sqrt(len(R_dens)))
             R += R_pena
 
@@ -244,11 +261,11 @@ class Optimizer():
                 txt += '%8.2f %8s %8.2f %% %8.1f %8.2f %s %s\n' \
                        % (r, prop, r / weight, target.hvap, weight, target.name, target.smiles)
 
-            if wExpansivity != 0:
+            if weight_expansivity != 0:
                 for i, r in enumerate(R_expa):
                     target = targets[i * 2]
                     prop = 'expan'
-                    weight = wExpansivity
+                    weight = weight_expansivity
                     txt += '%8.2f %8s %8.2f %% %8s %8.2f %s %s\n' \
                            % (r, prop, r / weight, '', weight, target.name, target.smiles)
 
@@ -295,13 +312,13 @@ class Optimizer():
             os.chdir(self.CWD)
 
             ### thermal expansivity
-            if wExpansivity != 0:
+            if weight_expansivity != 0:
                 J_expa = []
                 for i_mol in range(len(targets) // 2):
                     target_T1 = targets[2 * i_mol]
                     target_T2 = targets[2 * i_mol + 1]
                     dExpa = (target_T1.dDdp_array - target_T2.dDdp_array) / (target_T1.density - target_T2.density) \
-                            * 100 * wExpansivity
+                            * 100 * weight_expansivity
                     J_expa.append(list(dExpa))
 
                 J += J_expa
@@ -309,8 +326,11 @@ class Optimizer():
             ### parameter penalty
             J_pena = []
             for k, v in params.items():
-                d = 1 / adj_nb_paras[k]
-                penalty = PPF.get_penalty_for_para(k)
+                if k.endswith('bi'):
+                    d = 1
+                else:
+                    d = 1 / adj_nb_paras[k]
+                penalty = get_penalty_for_para(k)
                 J_pena.append(d * penalty * np.sqrt(len(J_dens)))
             J_pena = [list(a) for a in np.diag(J_pena)]  # convert list to diagonal matrix
             J += J_pena
@@ -344,7 +364,7 @@ class Optimizer():
                     txt += '%10.2f' % item
                 txt += ' %8s %s\n' % (prop, name)
 
-            if wExpansivity != 0:
+            if weight_expansivity != 0:
                 for i, row in enumerate(J_expa):
                     name = targets[2 * i].name
                     prop = 'expan'
@@ -383,7 +403,7 @@ class Optimizer():
             params.add(k, value=v, min=bound[0], max=bound[1])
 
         minimize = Minimizer(residual, params, iter_cb=callback)
-        result = minimize.leastsq(Dfun=jacobian, ftol=0.001)
+        result = minimize.leastsq(Dfun=jacobian, ftol=0.005)
         print(result.lmdif_message, '\n')
 
         return result.params

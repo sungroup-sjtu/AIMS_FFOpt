@@ -208,16 +208,3 @@ class PPF():
             raise Exception('Unknown parameter: ' + key)
 
         return bound
-
-    @staticmethod
-    def get_penalty_for_para(key):
-        if key.endswith('r0'):
-            penalty = 2.5
-        elif key.endswith('e0'):
-            penalty = 0.5
-        elif key.endswith('bi'):
-            penalty = 0
-        else:
-            penalty = 0
-
-        return penalty
