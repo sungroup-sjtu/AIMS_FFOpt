@@ -35,8 +35,8 @@ if __name__ == '__main__':
         optimizer.optimize(task_name=sys.argv[2],
                            torsions=torsions,
                            weight_expansivity=0.01,
-                           penalty_sigma=1,
-                           penalty_epsilon=0.2,
+                           penalty_sigma=2,
+                           penalty_epsilon=0.4,
                            penalty_charge=0)
 
     elif cmd == 'plot':
