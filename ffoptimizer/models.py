@@ -110,7 +110,7 @@ class Target(Base):
     def dir(self):
         return os.path.join(self.dir_base_npt, '%i-%i-%i' % (self.T, self.P, self.task.iteration))
 
-    def run_npt(self, ppf_file=None, paras_diff: OrderedDict = None) -> [str]:
+    def run_npt(self, ppf_file=None, paras_diff: OrderedDict = None, return_dict=None) -> [str]:
         cd_or_create_and_cd(self.dir_base_npt)
 
         if not os.path.exists('init.msd'):
@@ -176,9 +176,11 @@ class Target(Base):
 
         if npt.jobmanager.queue != 'gtx':
             npt.run()
-            return []
-        else:
-            return commands
+            commands = []
+
+        if return_dict is not None:
+            return_dict[self.dir] = commands
+        return commands
 
     def get_npt_result(self, iteration=None) -> (float, float):
         if iteration is None:

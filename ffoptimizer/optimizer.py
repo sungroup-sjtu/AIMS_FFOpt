@@ -4,6 +4,7 @@ import time
 import shutil
 import json
 from collections import OrderedDict
+import multiprocessing
 
 import numpy as np
 from lmfit import Parameters, Minimizer
@@ -170,12 +171,22 @@ class Optimizer():
                 gtx_dirs = []
                 gtx_cmds = []
                 ###
+                manager = multiprocessing.Manager()
+                return_dict = manager.dict()
+                jobs = []
                 for target in task.targets:
-                    cmds = target.run_npt(ppf_out, paras)
-                    ### save gtx_dirs and gtx_cmds for running jobs on gtx queue
-                    if cmds != []:
-                        gtx_dirs.append(target.dir)
-                        gtx_cmds = cmds
+                    p = multiprocessing.Process(target=target.run_npt, args=(ppf_out, paras, return_dict))
+                    jobs.append(p)
+                    p.start()
+
+                for p in jobs:
+                    p.join()
+
+                ### save gtx_dirs and gtx_cmds for running jobs on gtx queue
+                cmds = list(return_dict.values())[0]
+                if cmds != []:
+                    gtx_dirs = list(return_dict.keys())
+                    gtx_cmds = cmds
 
                 os.chdir(self.CWD)
 
