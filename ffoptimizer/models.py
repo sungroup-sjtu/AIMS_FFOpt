@@ -110,7 +110,7 @@ class Target(Base):
     def dir(self):
         return os.path.join(self.dir_base_npt, '%i-%i-%i' % (self.T, self.P, self.task.iteration))
 
-    def run_npt(self, ppf_file=None, paras_diff: OrderedDict = None, return_dict=None) -> [str]:
+    def run_npt(self, ppf_file=None, paras_diff: OrderedDict = None) -> [str]:
         cd_or_create_and_cd(self.dir_base_npt)
 
         if not os.path.exists('init.msd'):
@@ -142,7 +142,10 @@ class Target(Base):
         ppf_diff = '_tmp.ppf'
         if paras_diff is not None:
             commands.append('export GMX_MAXCONSTRWARN=-1')
-            for k in paras_diff.keys():
+
+            import multiprocessing
+            def worker(k, return_dict):
+                worker_commands = []
                 for i in [-1, 1]:
                     basename = 'diff%i.%s' % (i, k)
                     top_out = basename + '.top'
@@ -159,16 +162,29 @@ class Target(Base):
 
                     npt.gmx.prepare_mdp_from_template('t_npt.mdp', mdp_out='diff.mdp', nstxtcout=0, restart=True)
                     cmd = npt.gmx.grompp(mdp='diff.mdp', top=top_out, tpr_out=basename + '.tpr', get_cmd=True)
-                    commands.append(cmd)
+                    worker_commands.append(cmd)
                     cmd = npt.gmx.mdrun(name=basename, nprocs=nprocs, rerun='npt.trr', get_cmd=True)
-                    commands.append(cmd)
+                    worker_commands.append(cmd)
 
                     npt.gmx.generate_top_for_hvap(top_out, top_out_hvap)
 
                     cmd = npt.gmx.grompp(mdp='diff.mdp', top=top_out_hvap, tpr_out=basename + '-hvap.tpr', get_cmd=True)
-                    commands.append(cmd)
+                    worker_commands.append(cmd)
                     cmd = npt.gmx.mdrun(name=basename + '-hvap', nprocs=nprocs, rerun='npt.trr', get_cmd=True)
-                    commands.append(cmd)
+                    worker_commands.append(cmd)
+                return_dict[k] = worker_commands
+
+            manager = multiprocessing.Manager()
+            return_dict = manager.dict()
+            jobs = []
+            for k in paras_diff.keys():
+                p = multiprocessing.Process(target=worker, args=(k, return_dict))
+                jobs.append(p)
+                p.start()
+            for p in jobs:
+                p.join()
+            for worker_commands in return_dict.values():
+                commands += worker_commands
 
         commands.append('touch _finished_')
         npt.jobmanager.generate_sh(os.getcwd(), commands,
@@ -178,8 +194,6 @@ class Target(Base):
             npt.run()
             commands = []
 
-        if return_dict is not None:
-            return_dict[self.dir] = commands
         return commands
 
     def get_npt_result(self, iteration=None) -> (float, float):
