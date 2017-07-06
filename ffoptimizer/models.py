@@ -128,7 +128,6 @@ class Target(Base):
 
         cd_or_create_and_cd(self.dir)
 
-        npt.msd = '_tmp.msd'
         shutil.copy('../init.msd', npt.msd)
         npt.export(ppf=ppf_file, minimize=False)
 
@@ -139,7 +138,6 @@ class Target(Base):
 
         commands.insert(0, 'touch _started_')
         nprocs = npt.jobmanager.nprocs
-        ppf_diff = '_tmp.ppf'
         if paras_diff is not None:
             commands.append('export GMX_MAXCONSTRWARN=-1')
 
@@ -148,8 +146,10 @@ class Target(Base):
                 worker_commands = []
                 for i in [-1, 1]:
                     basename = 'diff%i.%s' % (i, k)
-                    top_out = basename + '.top'
-                    top_out_hvap = basename + '-hvap.top'
+                    ppf_diff = basename + '.ppf'
+                    msd_diff = basename + '.msd'
+                    top_diff = basename + '.top'
+                    top_diff_hvap = basename + '-hvap.top'
 
                     paras = copy.copy(paras_diff)
                     paras[k] += PPF.get_delta_for_para(k) * i
@@ -157,18 +157,21 @@ class Target(Base):
                     ppf.set_nb_paras(paras)
                     ppf.write(ppf_diff)
 
-                    npt.dff.set_charge([npt.msd], ppf_diff)
-                    npt.dff.export_gmx(npt.msd, ppf_diff, gro_out='_tmp.gro', top_out=top_out)
+                    shutil.copy('../init.msd', msd_diff)
+
+                    npt.dff.set_charge([msd_diff], ppf_diff)
+                    npt.dff.export_gmx(msd_diff, ppf_diff, gro_out='_tmp.gro', top_out=top_diff)
 
                     npt.gmx.prepare_mdp_from_template('t_npt.mdp', mdp_out='diff.mdp', nstxtcout=0, restart=True)
-                    cmd = npt.gmx.grompp(mdp='diff.mdp', top=top_out, tpr_out=basename + '.tpr', get_cmd=True)
+                    cmd = npt.gmx.grompp(mdp='diff.mdp', top=top_diff, tpr_out=basename + '.tpr', get_cmd=True)
                     worker_commands.append(cmd)
                     cmd = npt.gmx.mdrun(name=basename, nprocs=nprocs, rerun='npt.trr', get_cmd=True)
                     worker_commands.append(cmd)
 
-                    npt.gmx.generate_top_for_hvap(top_out, top_out_hvap)
+                    npt.gmx.generate_top_for_hvap(top_diff, top_diff_hvap)
 
-                    cmd = npt.gmx.grompp(mdp='diff.mdp', top=top_out_hvap, tpr_out=basename + '-hvap.tpr', get_cmd=True)
+                    cmd = npt.gmx.grompp(mdp='diff.mdp', top=top_diff_hvap, tpr_out=basename + '-hvap.tpr',
+                                         get_cmd=True)
                     worker_commands.append(cmd)
                     cmd = npt.gmx.mdrun(name=basename + '-hvap', nprocs=nprocs, rerun='npt.trr', get_cmd=True)
                     worker_commands.append(cmd)
