@@ -137,9 +137,11 @@ class Target(Base):
                                dt=0.002, nst_eq=int(3E5), nst_run=int(2E5), nst_edr=200, nst_trr=200, nst_xtc=200)
 
         commands.insert(0, 'touch _started_')
-        nprocs = npt.jobmanager.nprocs
+
         if paras_diff is not None:
+            npt.gmx.prepare_mdp_from_template('t_npt.mdp', mdp_out='diff.mdp', nstxtcout=0, restart=True)
             commands.append('export GMX_MAXCONSTRWARN=-1')
+            nprocs = npt.jobmanager.nprocs
 
             import multiprocessing
             def worker(k, return_dict):
@@ -148,6 +150,7 @@ class Target(Base):
                     basename = 'diff%i.%s' % (i, k)
                     ppf_diff = basename + '.ppf'
                     msd_diff = basename + '.msd'
+                    gro_diff = basename + '.gro'
                     top_diff = basename + '.top'
                     top_diff_hvap = basename + '-hvap.top'
 
@@ -157,12 +160,11 @@ class Target(Base):
                     ppf.set_nb_paras(paras)
                     ppf.write(ppf_diff)
 
-                    shutil.copy('../init.msd', msd_diff)
+                    shutil.copy(npt.msd, msd_diff)
 
-                    npt.dff.set_charge([msd_diff], ppf_diff)
-                    npt.dff.export_gmx(msd_diff, ppf_diff, gro_out='_tmp.gro', top_out=top_diff)
+                    npt.dff.set_charge([msd_diff], ppf_diff, dfi_name=basename)
+                    npt.dff.export_gmx(msd_diff, ppf_diff, gro_out=gro_diff, top_out=top_diff, dfi_name=basename)
 
-                    npt.gmx.prepare_mdp_from_template('t_npt.mdp', mdp_out='diff.mdp', nstxtcout=0, restart=True)
                     cmd = npt.gmx.grompp(mdp='diff.mdp', top=top_diff, tpr_out=basename + '.tpr', get_cmd=True)
                     worker_commands.append(cmd)
                     cmd = npt.gmx.mdrun(name=basename, nprocs=nprocs, rerun='npt.trr', get_cmd=True)
@@ -175,6 +177,13 @@ class Target(Base):
                     worker_commands.append(cmd)
                     cmd = npt.gmx.mdrun(name=basename + '-hvap', nprocs=nprocs, rerun='npt.trr', get_cmd=True)
                     worker_commands.append(cmd)
+
+                    os.remove(ppf_diff)
+                    os.remove(msd_diff)
+                    os.remove(gro_diff)
+                    os.remove(basename + '.dfi')
+                    os.remove(basename + '.dfo')
+
                 return_dict[k] = worker_commands
 
             manager = multiprocessing.Manager()
