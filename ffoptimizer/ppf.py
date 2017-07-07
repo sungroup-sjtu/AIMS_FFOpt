@@ -149,6 +149,46 @@ class PPF():
                 terms[i] = term
         self.terms = terms
 
+    def modify_torsion(self, torsion_key, n, delta):
+        terms = [''] * len(self.terms)
+        for i, term in enumerate(self.terms):
+            if not (term.startswith('TCOSP')):
+                terms[i] = term
+                continue
+            words = term.split(':')
+            words = [w.strip() for w in words]
+            a_types = words[1]
+
+            a_type_words = a_types.split(',')
+            a_type_words = [w.strip() for w in a_type_words]
+
+            key_words = torsion_key.split(',')
+            key_words = [w.strip() for w in key_words]
+
+            paras = words[2]
+            para_words = paras.split(',')
+            para_words = [w.strip() for w in para_words]
+            multiplicity = len(para_words) // 3
+
+            if a_type_words == key_words or a_type_words == list(reversed(key_words)):
+                for k in range(multiplicity):
+                    n_str = para_words[3 * k + 2]
+                    para_str = para_words[3 * k + 1]
+                    if n_str.endswith('*'):
+                        n_str = n_str[:-1]
+                    if int(n_str) == n:
+                        if para_str.endswith('*'):
+                            para_str = para_str[:-1]
+                        para = float(para_str) + delta
+                        para_words[3 * k + 1] = str(para)
+
+                new_paras = ', '.join(para_words)
+                new_term = 'TCOSP: %s: %s:' % (a_types, new_paras)
+                terms[i] = new_term
+            else:
+                terms[i] = term
+        self.terms = terms
+
     def fit_torsion(self, qmd=None, msd=None, restraint=None, torsion_key=None):
         import os
         import random

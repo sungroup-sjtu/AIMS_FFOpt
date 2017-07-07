@@ -102,7 +102,7 @@ class Optimizer():
         self.db.session.delete(task)
         self.db.session.commit()
 
-    def optimize(self, task_name, power_residual=1, torsions=None,
+    def optimize(self, task_name, power_residual=1, torsions=None, modify_torsions=None,
                  weight_expansivity=0, penalty_sigma=0, penalty_epsilon=0, penalty_charge=0):
         task = self.db.session.query(Task).filter(Task.name == task_name).first()
         if task is None:
@@ -157,6 +157,9 @@ class Optimizer():
                             i + 1, len(torsions)))
                         print(torsion)
                         ppf.fit_torsion(torsion[0], torsion[1], torsion[2], torsion[3])
+            if modify_torsions is not None:
+                for torsion in modify_torsions:
+                    ppf.modify_torsion(torsion[0], torsion[1], torsion[2])
 
             ### new iteration
             task.iteration += 1

@@ -34,12 +34,17 @@ if __name__ == '__main__':
 
     elif cmd == 'optimize':
         torsions = [
-            # ('C2-MP2.qmd', 'C2.msd', 'TORS H5 C1 C2 H6 500.0 60.0 15.0 12', 'h_1, c_4, c_4, h_1'),
-            # ('C6-MP2.qmd', 'C6.msd', 'TORS C5 C8 C11 C14 500.0 180.0 10.0 18', 'c_4, c_4, c_4, c_4'),
+            ('C2-MP2.qmd', 'C2.msd', 'TORS H5 C1 C2 H6 500.0 60.0 15.0 12', 'h_1, c_4, c_4, h_1'),
+            ('C6-MP2.qmd', 'C6.msd', 'TORS C5 C8 C11 C14 500.0 180.0 10.0 18', 'c_4, c_4, c_4, c_4'),
+        ]
+
+        modify_torsions = [
+            # ('c_4, c_4, c_4, c_4', 2, 0.1),
         ]
 
         optimizer.optimize(task_name=sys.argv[2],
                            torsions=torsions,
+                           modify_torsions=modify_torsions,
                            weight_expansivity=0.01,
                            penalty_sigma=2,
                            penalty_epsilon=0.4,
