@@ -129,6 +129,18 @@ class Target(Base):
         cd_or_create_and_cd(self.dir)
 
         shutil.copy('../init.msd', npt.msd)
+
+        ### temperature dependence of epsilon
+        if paras_diff is not None:
+            paras = copy.copy(paras_diff)
+            for k, v in paras.items():
+                if k.endswith('de'):
+                    atype = k[:-3]
+                    paras[atype + '_e0'] += v * (self.T - 298)
+            ppf = PPF(ppf_file)
+            ppf.set_nb_paras(paras)
+            ppf_file = 'ff.ppf'
+            ppf.write(ppf_file)
         npt.export(ppf=ppf_file, minimize=False)
 
         npt.jobmanager.refresh_preferred_queue()
@@ -154,10 +166,11 @@ class Target(Base):
                     top_diff = basename + '.top'
                     top_diff_hvap = basename + '-hvap.top'
 
-                    paras = copy.copy(paras_diff)
-                    paras[k] += PPF.get_delta_for_para(k) * i
+                    ### temperature dependence of epsilon
+                    paras_delta = copy.copy(paras)
+                    paras_delta[k] += PPF.get_delta_for_para(k) * i
                     ppf = PPF(ppf_file)
-                    ppf.set_nb_paras(paras)
+                    ppf.set_nb_paras(paras_delta)
                     ppf.write(ppf_diff)
 
                     shutil.copy(npt.msd, msd_diff)
@@ -190,6 +203,9 @@ class Target(Base):
             return_dict = manager.dict()
             jobs = []
             for k in paras_diff.keys():
+                ### temperature dependence of epsilon
+                if k.endswith('de'):
+                    continue
                 p = multiprocessing.Process(target=worker, args=(k, return_dict))
                 jobs.append(p)
                 p.start()
@@ -235,6 +251,10 @@ class Target(Base):
         dDdp_list = []
         dHdp_list = []
         for k in paras.keys():
+            ### temperature dependence of epsilon
+            if k.endswith('de'):
+                dDdp_list.append(dDdp_list[-1] * (self.T - 298))
+                dHdp_list.append(dHdp_list[-1] * (self.T - 298))
             dDdp, dHdp = self.get_dDens_dHvap_from_para(k)
             dDdp_list.append(dDdp)
             dHdp_list.append(dHdp)

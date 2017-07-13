@@ -102,8 +102,9 @@ class Optimizer():
         self.db.session.delete(task)
         self.db.session.commit()
 
-    def optimize(self, task_name, power_residual=1, torsions=None, modify_torsions=None,
-                 weight_expansivity=0, penalty_sigma=0, penalty_epsilon=0, penalty_charge=0):
+    def optimize(self, task_name, torsions=None, modify_torsions=None,
+                 weight_expansivity=0, penalty_sigma=0, penalty_epsilon=0, penalty_charge=0,
+                 d_epsilon=False):
         task = self.db.session.query(Task).filter(Task.name == task_name).first()
         if task is None:
             print('Error: Task %s not exist' % task_name)
@@ -146,6 +147,7 @@ class Optimizer():
             ppf = PPF(string=task.ppf)
             paras = OrderedDict()
             for k, v in params.items():
+                print(k, v.value)
                 paras[k] = v.value
             ppf.set_nb_paras(paras)
 
@@ -174,6 +176,8 @@ class Optimizer():
                 gtx_cmds = []
                 ###
                 for target in task.targets:
+                    if target.npt_started():
+                        continue
                     cmds = target.run_npt(ppf_out, paras)
                     ### save gtx_dirs and gtx_cmds for running jobs on gtx queue
                     if cmds != []:
@@ -226,10 +230,10 @@ class Optimizer():
             # parameter penalty
             R_pena = []
             for k, v in params.items():
-                if k.endswith('bi'):
-                    res = v.value - adj_nb_paras[k]
-                else:
+                if k.endswith('r0') or k.endswith('e0'):
                     res = (v.value - adj_nb_paras[k]) / adj_nb_paras[k]
+                else:
+                    res = v.value - adj_nb_paras[k]
                 penalty = get_penalty_for_para(k)
                 R_pena.append(res * penalty * np.sqrt(len(R_dens)))
             R += R_pena
@@ -283,10 +287,6 @@ class Optimizer():
 
             return R
 
-            # self.R = R
-            # new_R = [r ** power_residual for r in R]
-            # return new_R
-
         def jacobian(params: Parameters):
             ### if result exist in database, ignore calculation
             result = self.db.session.query(Result).filter(
@@ -329,10 +329,10 @@ class Optimizer():
             ### parameter penalty
             J_pena = []
             for k, v in params.items():
-                if k.endswith('bi'):
-                    d = 1
-                else:
+                if k.endswith('r0') or k.endswith('e0'):
                     d = 1 / adj_nb_paras[k]
+                else:
+                    d = 1
                 penalty = get_penalty_for_para(k)
                 J_pena.append(d * penalty * np.sqrt(len(J_dens)))
             J_pena = [list(a) for a in np.diag(J_pena)]  # convert list to diagonal matrix
@@ -389,11 +389,6 @@ class Optimizer():
 
             return J
 
-            # new_J = []
-            # for i, j_list in enumerate(J):
-            #     new_J.append([power_residual * self.R[i] ** (power_residual - 1) * j for j in j_list])
-            # return new_J
-
         def callback(params: Parameters, iter: int, res: [float]):
             print('Wait for 3 seconds ...')
             time.sleep(3)
@@ -404,6 +399,10 @@ class Optimizer():
         for k, v in adj_nb_paras.items():
             bound = PPF.get_bound_for_para(k)
             params.add(k, value=v, min=bound[0], max=bound[1])
+            ### temperature dependence for epsilon
+            if d_epsilon and k.endswith('e0'):
+                atype = k[:-3]
+                params.add(atype + '_de', value=0, min=-0.001, max=0.001)
 
         minimize = Minimizer(residual, params, iter_cb=callback)
         result = minimize.leastsq(Dfun=jacobian, ftol=0.005)
