@@ -234,13 +234,13 @@ class PPF():
     def get_bound_for_para(key):
         if key.endswith('r0'):
             bound = (3, 5)
-            if key.startswith('h'):
+            if key.startswith('h_'):
                 bound = (2, 3)
         elif key.endswith('e0'):
-            bound = (0.01, 0.5)
-            if key.startswith('h'):
+            bound = (0.005, 0.5)
+            if key.startswith('h_'):
                 bound = (0.01, 0.1)
-            if key.startswith('c'):
+            if key.startswith('c_'):
                 bound = (0.01, 0.1)
         elif key.endswith('bi'):
             bound = (-0.6, 0.6)

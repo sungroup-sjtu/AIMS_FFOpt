@@ -36,12 +36,12 @@ for smiles, info in expt_data.items():
     dt = t_max - t_min
 
     t_list = [t_mid - 50, t_mid + 50]
-    if dt < 100:
+    if dt < 50:
+        print('# %s: dt < 50, not good' % name)
+        t_list = [t_min + 5 , t_max - 5]
+    elif dt < 100:
         print('# %s: dt < 100, not good' % name)
         t_list = [t_mid - 25, t_mid + 25]
-    elif dt < 50:
-        print('# %s: dt < 50, not good' % name)
-        t_list = [t_min, t_max]
 
     exp_density = []
     exp_hvap = []

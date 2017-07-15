@@ -47,7 +47,7 @@ class Optimizer():
             target.name = words[0]
             target.smiles = words[1]
             target.T = int(words[2])
-            target.P = int(words[3])
+            target.P = int(float(words[3])*1E5)
             target.density = float(words[4])
             target.wDens = float(words[5])
             target.hvap = float(words[6])
@@ -104,7 +104,7 @@ class Optimizer():
 
     def optimize(self, task_name, torsions=None, modify_torsions=None,
                  weight_expansivity=0, penalty_sigma=0, penalty_epsilon=0, penalty_charge=0,
-                 d_epsilon=False):
+                 d_epsilon=False, de_ignore=['h_']):
         task = self.db.session.query(Task).filter(Task.name == task_name).first()
         if task is None:
             print('Error: Task %s not exist' % task_name)
@@ -147,7 +147,7 @@ class Optimizer():
             ppf = PPF(string=task.ppf)
             paras = OrderedDict()
             for k, v in params.items():
-                print(k, v.value)
+                print(v)
                 paras[k] = v.value
             ppf.set_nb_paras(paras)
 
@@ -188,7 +188,7 @@ class Optimizer():
 
                 if gtx_dirs != []:
                     from .models import npt
-                    commands_list = npt.gmx.generate_gpu_multidir_cmds(gtx_dirs, gtx_cmds)
+                    commands_list = npt.gmx.generate_gpu_multidir_cmds(gtx_dirs, gtx_cmds, n_parallel=4)
                     npt.jobmanager.queue = 'gtx'
                     npt.jobmanager.nprocs = 2
                     for i, commands in enumerate(commands_list):
@@ -232,6 +232,8 @@ class Optimizer():
             for k, v in params.items():
                 if k.endswith('r0') or k.endswith('e0'):
                     res = (v.value - adj_nb_paras[k]) / adj_nb_paras[k]
+                elif k.endswith('de'):
+                    res = v.value
                 else:
                     res = v.value - adj_nb_paras[k]
                 penalty = get_penalty_for_para(k)
@@ -399,13 +401,24 @@ class Optimizer():
         for k, v in adj_nb_paras.items():
             bound = PPF.get_bound_for_para(k)
             params.add(k, value=v, min=bound[0], max=bound[1])
-            ### temperature dependence for epsilon
-            if d_epsilon and k.endswith('e0'):
-                atype = k[:-3]
-                params.add(atype + '_de', value=0, min=-0.001, max=0.001)
+
+        ### temperature dependence for epsilon
+        if d_epsilon:
+            for k, v in adj_nb_paras.items():
+                if k.endswith('e0'):
+                    atype= k[:3]
+                    de_key = atype + '_de'
+                    if not atype[:2] in de_ignore and not de_key in params.keys():
+                        params.add(de_key, value=0, min=0, max=0.01)
+                        if de_key.startswith('c_'):
+                            params[de_key].max = 0.003
+                        elif de_key.startswith('h_'):
+                            params[de_key].max = 0.001
+
 
         minimize = Minimizer(residual, params, iter_cb=callback)
-        result = minimize.leastsq(Dfun=jacobian, ftol=0.005)
+        #result = minimize.leastsq(Dfun=jacobian, ftol=0.005)
+        result = minimize.leastsq(Dfun=jacobian, ftol=0.0001)
         print(result.lmdif_message, '\n')
 
         return result.params

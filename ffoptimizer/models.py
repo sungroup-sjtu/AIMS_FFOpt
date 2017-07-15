@@ -29,6 +29,7 @@ sys.path.append(Config.MS_TOOLS_DIR)
 from mstools.utils import create_mol_from_smiles, cd_or_create_and_cd
 from mstools.jobmanager import Local, Torque, Slurm
 from mstools.simulation.gmx import Npt
+from mstools.unit import Unit
 
 if Config.JOB_MANAGER == 'local':
     jobmanager = Local(nprocs=Config.NPROC_PER_JOB)
@@ -118,7 +119,7 @@ class Target(Base):
             mol2 = 'mol.mol2'
             py_mol = create_mol_from_smiles(self.smiles, pdb_out=pdb, mol2_out=mol2)
             mass = py_mol.molwt * self.n_mol
-            length = (10 / 6.022 * mass / (self.density - 0.1)) ** (1 / 3)  # assume cubic box
+            length = (10 / 6.022 * mass / self.density) ** (1 / 3)  # assume cubic box
 
             print('Build coordinates using Packmol: %s molecules ...' % self.n_mol)
             npt.packmol.build_box([pdb], [self.n_mol], 'init.pdb', length=length - 2, tolerance=1.7, silent=True)
@@ -136,7 +137,9 @@ class Target(Base):
             for k, v in paras.items():
                 if k.endswith('de'):
                     atype = k[:-3]
-                    paras[atype + '_e0'] += v * (self.T - 298)
+                    for m in paras.keys():
+                        if m.startswith(atype) and m.endswith('_e0'):
+                            paras[m] += v * (self.T - 298) / 100
             ppf = PPF(ppf_file)
             ppf.set_nb_paras(paras)
             ppf_file = 'ff.ppf'
@@ -253,8 +256,14 @@ class Target(Base):
         for k in paras.keys():
             ### temperature dependence of epsilon
             if k.endswith('de'):
-                dDdp_list.append(dDdp_list[-1] * (self.T - 298))
-                dHdp_list.append(dHdp_list[-1] * (self.T - 298))
+                dDdp_list.append(0)
+                dHdp_list.append(0)
+                atype = k[:-3]
+                for i, m in enumerate(paras.keys()):
+                    if m.startswith(atype) and m.endswith('_e0'):
+                        dDdp_list[-1] += dDdp_list[i] * (self.T - 298) / 100
+                        dHdp_list[-1] += dHdp_list[i] * (self.T - 298) / 100
+                continue
             dDdp, dHdp = self.get_dDens_dHvap_from_para(k)
             dDdp_list.append(dDdp)
             dHdp_list.append(dHdp)
