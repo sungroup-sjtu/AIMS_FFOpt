@@ -29,7 +29,6 @@ sys.path.append(Config.MS_TOOLS_DIR)
 from mstools.utils import create_mol_from_smiles, cd_or_create_and_cd
 from mstools.jobmanager import Local, Torque, Slurm
 from mstools.simulation.gmx import Npt
-from mstools.unit import Unit
 
 if Config.JOB_MANAGER == 'local':
     jobmanager = Local(nprocs=Config.NPROC_PER_JOB)
@@ -135,16 +134,15 @@ class Target(Base):
         if paras_diff is not None:
             paras = copy.copy(paras_diff)
             for k, v in paras.items():
-                if k.endswith('de'):
-                    atype = k[:-3]
-                    for m in paras.keys():
-                        if m.startswith(atype) and m.endswith('_e0'):
-                            paras[m] += v * (self.T - 298) / 100
+                if k.endswith('dr') or k.endswith('de'):
+                    paras[k] = v * (self.T - 298) / 100
             ppf = PPF(ppf_file)
-            ppf.set_nb_paras(paras)
-            ppf_file = 'ff.ppf'
-            ppf.write(ppf_file)
-        npt.export(ppf=ppf_file, minimize=False)
+            ppf.set_nb_paras(paras, delta=True)
+            ppf_run = 'run.ppf'
+            ppf.write(ppf_run)
+        else:
+            ppf_run = ppf_file
+        npt.export(ppf=ppf_run, minimize=False)
 
         npt.jobmanager.refresh_preferred_queue()
         # TODO because of the float error in gmx edr file, MAKE SURE nst_edr equals nst_trr and nst_xtc
@@ -169,11 +167,14 @@ class Target(Base):
                     top_diff = basename + '.top'
                     top_diff_hvap = basename + '-hvap.top'
 
-                    ### temperature dependence of epsilon
-                    paras_delta = copy.copy(paras)
+                    ### temperature dependence
+                    paras_delta = copy.copy(paras_diff)
                     paras_delta[k] += PPF.get_delta_for_para(k) * i
+                    for fuck, v in paras_delta.items():
+                        if fuck.endswith('dr') or fuck.endswith('de'):
+                            paras_delta[fuck] = v * (self.T - 298) / 100
                     ppf = PPF(ppf_file)
-                    ppf.set_nb_paras(paras_delta)
+                    ppf.set_nb_paras(paras_delta, delta=True)
                     ppf.write(ppf_diff)
 
                     shutil.copy(npt.msd, msd_diff)
@@ -206,9 +207,6 @@ class Target(Base):
             return_dict = manager.dict()
             jobs = []
             for k in paras_diff.keys():
-                ### temperature dependence of epsilon
-                if k.endswith('de'):
-                    continue
                 p = multiprocessing.Process(target=worker, args=(k, return_dict))
                 jobs.append(p)
                 p.start()
@@ -254,16 +252,6 @@ class Target(Base):
         dDdp_list = []
         dHdp_list = []
         for k in paras.keys():
-            ### temperature dependence of epsilon
-            if k.endswith('de'):
-                dDdp_list.append(0)
-                dHdp_list.append(0)
-                atype = k[:-3]
-                for i, m in enumerate(paras.keys()):
-                    if m.startswith(atype) and m.endswith('_e0'):
-                        dDdp_list[-1] += dDdp_list[i] * (self.T - 298) / 100
-                        dHdp_list[-1] += dHdp_list[i] * (self.T - 298) / 100
-                continue
             dDdp, dHdp = self.get_dDens_dHvap_from_para(k)
             dDdp_list.append(dDdp)
             dHdp_list.append(dHdp)

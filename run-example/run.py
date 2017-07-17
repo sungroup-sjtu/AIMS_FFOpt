@@ -27,7 +27,10 @@ if __name__ == '__main__':
         optimizer.list_task()
 
     elif cmd == 'reset':
-        optimizer.reset_task(sys.argv[2])
+        ppf_file = None
+        if len(sys.argv) > 3:
+            ppf_file = sys.argv[3]
+        optimizer.reset_task(sys.argv[2], ppf_file)
 
     elif cmd == 'remove':
         optimizer.remove_task(sys.argv[2])
@@ -48,7 +51,10 @@ if __name__ == '__main__':
                            weight_expansivity=0.01,
                            penalty_sigma=2,
                            penalty_epsilon=0.4,
-                           penalty_charge=0)
+                           penalty_charge=0,
+                           dr_atoms=[],
+                           de_atoms=[]
+                           )
 
     elif cmd == 'plot':
         iterations = None

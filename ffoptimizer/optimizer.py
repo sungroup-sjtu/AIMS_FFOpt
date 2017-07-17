@@ -47,7 +47,7 @@ class Optimizer():
             target.name = words[0]
             target.smiles = words[1]
             target.T = int(words[2])
-            target.P = int(float(words[3])*1E5)
+            target.P = int(float(words[3]) * 1E5)
             target.density = float(words[4])
             target.wDens = float(words[5])
             target.hvap = float(words[6])
@@ -66,25 +66,29 @@ class Optimizer():
         for task in self.db.session.query(Task):
             print(task.name, task.dir)
 
-    def reset_task(self, task_name):
+    def reset_task(self, task_name, ppf_file=None):
         task = self.db.session.query(Task).filter(Task.name == task_name).first()
         if task is None:
             print('Error: Task %s not exist' % task_name)
             sys.exit(0)
 
         for target in task.targets:
-            files = os.listdir(target.dir_base_npt)
-            for filename in files:
-                filepath = os.path.join(target.dir_base_npt, filename)
-                if os.path.isdir(filepath) and not filepath.endswith('-1'):
-                    try:
+            try:
+                files = os.listdir(target.dir_base_npt)
+                for filename in files:
+                    filepath = os.path.join(target.dir_base_npt, filename)
+                    if os.path.isdir(filepath) and not filepath.endswith('-1'):
                         shutil.rmtree(filepath)
-                    except Exception as e:
-                        print(str(e))
+            except Exception as e:
+                print(str(e))
 
         task.results.delete()
         task.iteration = 0
         self.db.session.commit()
+
+        if ppf_file is not None:
+            ppf = PPF(ppf_file)
+            task.ppf = str(ppf)
 
     def remove_task(self, task_name):
         task = self.db.session.query(Task).filter(Task.name == task_name).first()
@@ -104,7 +108,7 @@ class Optimizer():
 
     def optimize(self, task_name, torsions=None, modify_torsions=None,
                  weight_expansivity=0, penalty_sigma=0, penalty_epsilon=0, penalty_charge=0,
-                 d_epsilon=False, de_ignore=['h_']):
+                 dr_atoms=[], de_atoms=[]):
         task = self.db.session.query(Task).filter(Task.name == task_name).first()
         if task is None:
             print('Error: Task %s not exist' % task_name)
@@ -232,7 +236,7 @@ class Optimizer():
             for k, v in params.items():
                 if k.endswith('r0') or k.endswith('e0'):
                     res = (v.value - adj_nb_paras[k]) / adj_nb_paras[k]
-                elif k.endswith('de'):
+                elif k.endswith('dr') or k.endswith('de'):
                     res = v.value
                 else:
                     res = v.value - adj_nb_paras[k]
@@ -255,28 +259,28 @@ class Optimizer():
             txt += '\nPARAMETERS:\n'
             for k, v in params.items():
                 txt += '%10.5f  %s\n' % (v.value, k)
-            txt += '\n%8s %8s %10s %8s %8s %s %s\n' % (
-                'RESIDUAL', 'Property', 'Deviation', 'Expt.', 'Weight', 'Molecule', 'SMILES')
+            txt += '\n%8s %8s %10s %8s %8s %3s %5s %s %s\n' % (
+                'RESIDUAL', 'Property', 'Deviation', 'Expt.', 'Weight', 'T', 'P', 'Molecule', 'SMILES')
             for i, r in enumerate(R_dens):
                 target = targets[i]
                 prop = 'density'
                 weight = target.wDens
-                txt += '%8.2f %8s %8.2f %% %8.3f %8.2f %s %s\n' \
-                       % (r, prop, r / weight, target.density, weight, target.name, target.smiles)
+                txt += '%8.2f %8s %8.2f %% %8.3f %8.2f %3i %5.1f %s %s\n' % (
+                    r, prop, r / weight, target.density, weight, target.T, target.P / 1E5, target.name, target.smiles)
             for i, r in enumerate(R_hvap):
                 target = targets[i]
                 prop = 'hvap'
                 weight = target.wHvap
-                txt += '%8.2f %8s %8.2f %% %8.1f %8.2f %s %s\n' \
-                       % (r, prop, r / weight, target.hvap, weight, target.name, target.smiles)
+                txt += '%8.2f %8s %8.2f %% %8.1f %8.2f %3i %5.1f %s %s\n' % (
+                    r, prop, r / weight, target.hvap, weight, target.T, target.P / 1E5, target.name, target.smiles)
 
             if weight_expansivity != 0:
                 for i, r in enumerate(R_expa):
                     target = targets[i * 2]
                     prop = 'expan'
                     weight = weight_expansivity
-                    txt += '%8.2f %8s %8.2f %% %8s %8.2f %s %s\n' \
-                           % (r, prop, r / weight, '', weight, target.name, target.smiles)
+                    txt += '%8.2f %8s %8.2f %% %8s %8.2f %3s %5s %s %s\n' % (
+                        r, prop, r / weight, '', weight, '', '', target.name, target.smiles)
 
             for i, r in enumerate(R_pena):
                 prop = 'penalty'
@@ -402,23 +406,14 @@ class Optimizer():
             bound = PPF.get_bound_for_para(k)
             params.add(k, value=v, min=bound[0], max=bound[1])
 
-        ### temperature dependence for epsilon
-        if d_epsilon:
-            for k, v in adj_nb_paras.items():
-                if k.endswith('e0'):
-                    atype= k[:3]
-                    de_key = atype + '_de'
-                    if not atype[:2] in de_ignore and not de_key in params.keys():
-                        params.add(de_key, value=0, min=0, max=0.01)
-                        if de_key.startswith('c_'):
-                            params[de_key].max = 0.003
-                        elif de_key.startswith('h_'):
-                            params[de_key].max = 0.001
-
+        ### temperature dependence
+        for atom in dr_atoms:
+            params.add(atom + '_dr', value=0, min=-0.3, max=0.3)
+        for atom in de_atoms:
+            params.add(atom + '_de', value=0, min=-0.015, max=0.015)
 
         minimize = Minimizer(residual, params, iter_cb=callback)
-        #result = minimize.leastsq(Dfun=jacobian, ftol=0.005)
-        result = minimize.leastsq(Dfun=jacobian, ftol=0.0001)
+        result = minimize.leastsq(Dfun=jacobian, ftol=0.001)
         print(result.lmdif_message, '\n')
 
         return result.params

@@ -15,11 +15,11 @@ class MacConfig():
 
 
 class ClusterConfig():
-    DFF_ROOT = '/share/apps/dff/msdserver'
+    DFF_ROOT = '/home/gongzheng/apps/DFF/msdserver'
     PACKMOL_BIN = '/share/apps/tools/packmol'
     GMX_BIN = '/share/apps/gromacs/2016.3-msdserver/bin/gmx_gpu'
 
-    MS_TOOLS_DIR = '/home/msdserver/msd-server'
+    MS_TOOLS_DIR = '/home/gongzheng/GitHub/ms-tools'
     WORK_DIR = '/share/workspace/msdserver/MSDServer/'
 
     JOB_MANAGER = 'torque'

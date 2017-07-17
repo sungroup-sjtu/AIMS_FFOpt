@@ -2,6 +2,147 @@ from collections import OrderedDict
 from typing import Dict
 
 
+class Parameter():
+    def __init__(self, string):
+        string = string.strip()
+        if string.endswith('*'):
+            self.fixed = True
+            self.value = float(string[:-1])
+        else:
+            self.fixed = False
+            self.value = float(string)
+
+    def __str__(self):
+        if self.fixed:
+            return str(self.value) + '*'
+        else:
+            return str(self.value)
+
+
+class FFTerm():
+    def __init__(self, term, key, value, comment):
+        self.term = term.strip()
+        self.key = key.strip()
+        self.value = value.strip()
+        self.comment = comment.strip()
+
+    def __str__(self):
+        return '%s: %s: %s: %s' % (self.term, self.key, self.value, self.comment)
+
+
+class BINC(FFTerm):
+    def __init__(self, key, value, comment=''):
+        super().__init__('BINC', key, value, comment)
+        atom_types = key.strip().split(',')
+        self.atom1 = atom_types[0].strip()
+        self.atom2 = atom_types[1].strip()
+        self.binc = Parameter(value)
+
+    def __str__(self):
+        return '%s: %s, %s: %s: %s' % (self.term, self.atom1, self.atom2, self.binc, self.comment)
+
+
+class LJ(FFTerm):
+    def __init__(self, key, value, comment=''):
+        super().__init__('N12_6', key, value, comment)
+        self.atom = key.strip()
+        self.r0 = Parameter(value.split(',')[0])
+        self.e0 = Parameter(value.split(',')[1])
+
+    def __str__(self):
+        return '%s: %s: %s, %s: %s' % (self.term, self.atom, self.r0, self.e0, self.comment)
+
+
+class BHARM(FFTerm):
+    def __init__(self, key, value, comment=''):
+        super().__init__('BHARM', key, value, comment)
+        atom_types = key.strip().split(',')
+        self.atom1 = atom_types[0].strip()
+        self.atom2 = atom_types[1].strip()
+        self.b0 = Parameter(value.split(',')[0])
+        self.kb = Parameter(value.split(',')[1])
+
+    def __str__(self):
+        return '%s: %s, %s: %s, %s: %s' % (self.term, self.atom1, self.atom2, self.b0, self.kb, self.comment)
+
+
+class AHARM(FFTerm):
+    def __init__(self, key, value, comment=''):
+        super().__init__('AHARM', key, value, comment)
+        atom_types = key.strip().split(',')
+        self.atom1 = atom_types[0].strip()
+        self.atom2 = atom_types[1].strip()
+        self.atom3 = atom_types[2].strip()
+        self.a0 = Parameter(value.split(',')[0])
+        self.ka = Parameter(value.split(',')[1])
+
+    def __str__(self):
+        return '%s: %s, %s, %s: %s, %s: %s' % (
+            self.term, self.atom1, self.atom2, self.atom3, self.a0, self.ka, self.comment)
+
+
+class TCOSP(FFTerm):
+    def __init__(self, key, value, comment=''):
+        super().__init__('TCOSP', key, value, comment)
+        atom_types = key.strip().split(',')
+        self.atom1 = atom_types[0].strip()
+        self.atom2 = atom_types[1].strip()
+        self.atom3 = atom_types[2].strip()
+        self.atom4 = atom_types[3].strip()
+
+        self.k1 = Parameter('0')
+        self.k2 = Parameter('0')
+        self.k3 = Parameter('0')
+        para_list = value.split(',')
+        para_list = [para.strip() for para in para_list]
+        n_multi = len(para_list) // 3
+        for i in range(n_multi):
+            k = Parameter(para_list[3 * i + 1])
+            if para_list[3 * i + 2].startswith('1'):
+                self.k1 = k
+            elif para_list[3 * i + 2].startswith('2'):
+                self.k2 = k
+            elif para_list[3 * i + 2].startswith('3'):
+                self.k3 = k
+
+    def __str__(self):
+        return '%s: %s, %s, %s, %s: %s: %s' % (self.term, self.atom1, self.atom2, self.atom3, self.atom4,
+                                               self.para_str, self.comment)
+
+    @property
+    def para_str(self):
+        para_list = []
+        if self.k3.value != 0 or self.k3.fixed:
+            para_list.append('0*, %s, 3*' % self.k3)
+        if self.k1.value != 0 or self.k2.fixed:
+            para_list.append('0*, %s, 1*' % self.k1)
+        if self.k2.value != 0 or self.k1.fixed:
+            para_list.append('180*, %s, 2*' % self.k2)
+        return ', '.join(para_list)
+
+
+def get_ppf_term_from_line(line):
+    words = line.strip().split(':')
+    if len(words) >= 4:
+        comment = words[3]
+    else:
+        comment = ''
+
+    if line.startswith('BINC'):
+        term = BINC(words[1], words[2], comment)
+    elif line.startswith('N12_6'):
+        term = LJ(words[1], words[2], comment)
+    elif line.startswith('BHARM'):
+        term = BHARM(words[1], words[2], comment)
+    elif line.startswith('AHARM'):
+        term = AHARM(words[1], words[2], comment)
+    elif line.startswith('TCOSP'):
+        term = TCOSP(words[1], words[2], comment)
+    else:
+        term = FFTerm(words[0], words[1], words[2], comment)
+    return term
+
+
 class PPF():
     def __init__(self, ppf_file=None, string=None):
         lines = []
@@ -10,184 +151,115 @@ class PPF():
                 lines = f.read().splitlines()
         if string is not None:
             lines = string.splitlines()
-        self.terms = [l.strip() for l in lines]
+
+        self.pre_lines = []
+        self.terms = []
+
+        PPF_START = False
+        for line in lines:
+            line = line.strip()
+            if line == '#DFF:PPF':
+                PPF_START = True
+            if line.startswith('#') or not PPF_START:
+                self.pre_lines.append(line)
+            else:
+                self.terms.append(get_ppf_term_from_line(line))
 
     def __str__(self):
-        return '\n'.join(self.terms)
-
-    def get_adj_nb_paras(self) -> OrderedDict:
-        terms = OrderedDict()
+        string = '\n'.join(self.pre_lines)
         for term in self.terms:
-            if not (term.startswith('N12_6') or term.startswith('BINC')):
-                continue
-
-            words = term.split(':')
-            words = [w.strip() for w in words]
-            if term.startswith('N12_6'):
-                a_type = words[1]
-                paras = words[2]
-
-                words = paras.split(',')
-                words = [w.strip() for w in words]
-                r0 = words[0]
-                e0 = words[1]
-                if not r0.endswith('*'):
-                    terms['%s_r0' % a_type] = float(r0)
-                if not e0.endswith('*'):
-                    terms['%s_e0' % a_type] = float(e0)
-            elif term.startswith('BINC'):
-                a_types = words[1]
-                para = words[2]
-
-                words = a_types.split(',')
-                words = [w.strip() for w in words]
-                a1_type = words[0]
-                a2_type = words[1]
-                if not para.endswith('*'):
-                    terms['%s_%s_bi' % (a1_type, a2_type)] = float(para)
-        return terms
-
-    def set_nb_paras(self, new_paras: Dict):
-        terms = [''] * len(self.terms)
-        replaced = False
-        for i, term in enumerate(self.terms):
-            if not (term.startswith('N12_6') or term.startswith('BINC')):
-                terms[i] = term
-                continue
-
-            if term.startswith('N12_6'):
-                words = term.split(':')
-                words = [w.strip() for w in words]
-                a_type = words[1]
-                paras = words[2]
-                words = paras.split(',')
-                words = [w.strip() for w in words]
-                r0 = words[0]
-                e0 = words[1]
-
-                r0_key = '%s_r0' % a_type
-                if r0_key in new_paras.keys():
-                    r0 = new_paras[r0_key]
-                    replaced = True
-
-                e0_key = '%s_e0' % a_type
-                if e0_key in new_paras.keys():
-                    e0 = new_paras[e0_key]
-                    replaced = True
-
-                new_term = 'N12_6: %s: %s, %s:' % (a_type, str(r0), str(e0))
-                terms[i] = new_term
-
-            elif term.startswith('BINC'):
-                words = term.split(':')
-                words = [w.strip() for w in words]
-                a_types = words[1]
-                bi = words[2]
-
-                words = a_types.split(',')
-                words = [w.strip() for w in words]
-                a1_type = words[0]
-                a2_type = words[1]
-
-                bi_key = '%s_%s_bi' % (a1_type, a2_type)
-                if bi_key in new_paras.keys():
-                    bi = new_paras[bi_key]
-                    replaced = True
-
-                new_term = 'BINC: %s, %s: %s:' % (a1_type, a2_type, str(bi))
-                terms[i] = new_term
-
-        self.terms = terms
-        return replaced
+            string += '\n' + str(term)
+        return string
 
     def write(self, ppf_out):
         with open(ppf_out, 'w') as f:
             f.write(str(self))
 
+    def get_adj_nb_paras(self) -> OrderedDict:
+        adj_paras = OrderedDict()
+        for term in self.terms:
+            if term.term == 'N12_6':
+                if not term.e0.fixed:
+                    adj_paras[term.atom + '_e0'] = term.e0.value
+                if not term.r0.fixed:
+                    adj_paras[term.atom + '_r0'] = term.r0.value
+
+            elif term.term == 'BINC':
+                if not term.binc.fixed:
+                    adj_paras['%s_%s_bi' % (term.atom1, term.atom2)] = term.binc.value
+
+        return adj_paras
+
+    def set_nb_paras(self, new_paras: Dict, delta=False):
+        REPLACED = False
+        for term in self.terms:
+            if term.term == 'N12_6':
+                key = term.atom + '_e0'
+                if key in new_paras.keys():
+                    term.e0.value = new_paras[key]
+                    term.e0.fixed = False
+                    REPLACED = True
+                key = term.atom + '_r0'
+                if key in new_paras.keys():
+                    term.r0.value = new_paras[key]
+                    term.r0.fixed = False
+                    REPLACED = True
+            elif term.term == 'BINC':
+                key = '%s_%s_bi' % (term.atom1, term.atom2)
+                if key in new_paras.keys():
+                    term.binc.value = new_paras[key]
+                    term.binc.fixed = False
+                    REPLACED = True
+
+        ### temperature dependent
+        if delta:
+            for term in self.terms:
+                if term.term == 'N12_6':
+                    key = term.atom[:3] + '_de' # c_4_de, h_1_de
+                    if key in new_paras.keys():
+                        term.e0.value += new_paras[key]
+                        REPLACED = True
+                    key = term.atom[:3] + '_dr' # c_4_dr, h_1_dr
+                    if key in new_paras.keys():
+                        term.r0.value += new_paras[key]
+                        REPLACED = True
+
+            return REPLACED
+
     def freeze_torsions(self):
-        terms = [''] * len(self.terms)
-        for i, term in enumerate(self.terms):
-            if not (term.startswith('TCOSP')):
-                terms[i] = term
-                continue
-            words = term.split(':')
-            words = [w.strip() for w in words]
-            a_types = words[1]
-            paras = words[2]
-            para_words = paras.split(',')
-            para_words = [w.strip() for w in para_words]
-            for k in range(len(para_words)):
-                para_word = para_words[k]
-                if not para_word.endswith('*'):
-                    para_words[k] += '*'
-            new_paras = ', '.join(para_words)
-            new_term = 'TCOSP: %s: %s:' % (a_types, new_paras)
-            terms[i] = new_term
-        self.terms = terms
+        for term in self.terms:
+            if term.term == 'TCOSP':
+                term.k1.fixed = True
+                term.k2.fixed = True
+                term.k3.fixed = True
 
     def relax_torsion(self, torsion_key):
-        terms = [''] * len(self.terms)
-        for i, term in enumerate(self.terms):
-            if not (term.startswith('TCOSP')):
-                terms[i] = term
-                continue
-            words = term.split(':')
-            words = [w.strip() for w in words]
-            a_types = words[1]
-
-            a_type_words = a_types.split(',')
-            a_type_words = [w.strip() for w in a_type_words]
-
-            key_words = torsion_key.split(',')
-            key_words = [w.strip() for w in key_words]
-
-            if a_type_words == key_words or a_type_words == list(reversed(key_words)):
-                new_paras = '0*, 0.0, 3*, 0*, 0.0, 1*, 180*, 0.0, 2*'
-                new_term = 'TCOSP: %s: %s:' % (a_types, new_paras)
-                terms[i] = new_term
-            else:
-                terms[i] = term
-        self.terms = terms
+        for term in self.terms:
+            if term.term == 'TCOSP':
+                key_words = torsion_key.split(',')
+                key_words = [w.strip() for w in key_words]
+                term_key_words = [term.atom1, term.atom2, term.atom3, term.atom4]
+                if term_key_words == key_words or term_key_words == list(reversed(key_words)):
+                    term.k1.value = 0.0001
+                    term.k2.value = 0.0001
+                    term.k3.value = 0.0001
+                    term.k1.fixed = False
+                    term.k2.fixed = False
+                    term.k3.fixed = False
 
     def modify_torsion(self, torsion_key, n, delta):
-        terms = [''] * len(self.terms)
-        for i, term in enumerate(self.terms):
-            if not (term.startswith('TCOSP')):
-                terms[i] = term
-                continue
-            words = term.split(':')
-            words = [w.strip() for w in words]
-            a_types = words[1]
-
-            a_type_words = a_types.split(',')
-            a_type_words = [w.strip() for w in a_type_words]
-
-            key_words = torsion_key.split(',')
-            key_words = [w.strip() for w in key_words]
-
-            paras = words[2]
-            para_words = paras.split(',')
-            para_words = [w.strip() for w in para_words]
-            multiplicity = len(para_words) // 3
-
-            if a_type_words == key_words or a_type_words == list(reversed(key_words)):
-                for k in range(multiplicity):
-                    n_str = para_words[3 * k + 2]
-                    para_str = para_words[3 * k + 1]
-                    if n_str.endswith('*'):
-                        n_str = n_str[:-1]
-                    if int(n_str) == n:
-                        if para_str.endswith('*'):
-                            para_str = para_str[:-1]
-                        para = float(para_str) + delta
-                        para_words[3 * k + 1] = str(para)
-
-                new_paras = ', '.join(para_words)
-                new_term = 'TCOSP: %s: %s:' % (a_types, new_paras)
-                terms[i] = new_term
-            else:
-                terms[i] = term
-        self.terms = terms
+        for term in self.terms:
+            if term.term == 'TCOSP':
+                key_words = torsion_key.split(',')
+                key_words = [w.strip() for w in key_words]
+                term_key_words = [term.atom1, term.atom2, term.atom3, term.atom4]
+                if term_key_words == key_words or term_key_words == list(reversed(key_words)):
+                    if n == 1:
+                        term.k1.value += delta
+                    elif n == 2:
+                        term.k2.value += delta
+                    elif n == 3:
+                        term.k3.value += delta
 
     def fit_torsion(self, qmd=None, msd=None, restraint=None, torsion_key=None):
         import os
@@ -225,6 +297,10 @@ class PPF():
             delta = 0.001
         elif key.endswith('bi'):
             delta = 0.005
+        elif key.endswith('dr'):
+            delta = 0.1
+        elif key.endswith('de'):
+            delta = 0.002
         else:
             raise Exception('Unknown parameter: ' + key)
 
@@ -237,9 +313,9 @@ class PPF():
             if key.startswith('h_'):
                 bound = (2, 3)
         elif key.endswith('e0'):
-            bound = (0.005, 0.5)
+            bound = (0.01, 0.5)
             if key.startswith('h_'):
-                bound = (0.01, 0.1)
+                bound = (0.01, 0.05)
             if key.startswith('c_'):
                 bound = (0.01, 0.1)
         elif key.endswith('bi'):
