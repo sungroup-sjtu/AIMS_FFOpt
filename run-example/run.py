@@ -36,6 +36,9 @@ if __name__ == '__main__':
         optimizer.remove_task(sys.argv[2])
 
     elif cmd == 'optimize':
+        if len(sys.argv) > 3:
+            optimizer.n_parallel = int(sys.argv[3])
+
         torsions = [
             ('C2-MP2.qmd', 'C2.msd', 'TORS H5 C1 C2 H6 500.0 60.0 15.0 12', 'h_1, c_4, c_4, h_1'),
             ('C6-MP2.qmd', 'C6.msd', 'TORS C5 C8 C11 C14 500.0 180.0 10.0 18', 'c_4, c_4, c_4, c_4'),
@@ -52,8 +55,8 @@ if __name__ == '__main__':
                            penalty_sigma=2,
                            penalty_epsilon=0.4,
                            penalty_charge=0,
-                           dr_atoms=[],
-                           de_atoms=[]
+                           dr_atoms={},
+                           de_atoms={},
                            )
 
     elif cmd == 'plot':

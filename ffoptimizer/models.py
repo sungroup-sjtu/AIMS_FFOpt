@@ -1,18 +1,17 @@
 import copy
 import math
 import os
-import sys
 import shutil
+import sys
 from collections import OrderedDict
+from functools import partial
 
 import numpy as np
-import pybel
 import panedr
+import pybel
 from pandas import Series
 from sqlalchemy import Column, Integer, Text, Float, String, ForeignKey
 from sqlalchemy.orm import relationship
-
-from functools import partial
 
 NotNullColumn = partial(Column, nullable=False)
 
@@ -21,7 +20,6 @@ from sqlalchemy.ext.declarative import declarative_base
 Base = declarative_base()
 metadata = Base.metadata
 
-from .ppf import PPF
 from .config import Config
 
 sys.path.append(Config.MS_TOOLS_DIR)
@@ -29,6 +27,7 @@ sys.path.append(Config.MS_TOOLS_DIR)
 from mstools.utils import create_mol_from_smiles, cd_or_create_and_cd
 from mstools.jobmanager import Local, Torque, Slurm
 from mstools.simulation.gmx import Npt
+from mstools.wrapper.ppf import PPF
 
 if Config.JOB_MANAGER == 'local':
     jobmanager = Local(nprocs=Config.NPROC_PER_JOB)
@@ -133,8 +132,9 @@ class Target(Base):
         ### temperature dependence of epsilon
         if paras_diff is not None:
             paras = copy.copy(paras_diff)
+            paras.update({'all_dr': -0.01, 'all_de': 0.056})
             for k, v in paras.items():
-                if k.endswith('dr') or k.endswith('de'):
+                if k.endswith('dr') or k.endswith('de') or k.endswith('dl'):
                     paras[k] = v * (self.T - 298) / 100
             ppf = PPF(ppf_file)
             ppf.set_nb_paras(paras, delta=True)
@@ -170,8 +170,9 @@ class Target(Base):
                     ### temperature dependence
                     paras_delta = copy.copy(paras_diff)
                     paras_delta[k] += PPF.get_delta_for_para(k) * i
+                    paras_delta.update({'all_dr': -0.01, 'all_de': 0.056})
                     for fuck, v in paras_delta.items():
-                        if fuck.endswith('dr') or fuck.endswith('de'):
+                        if fuck.endswith('dr') or fuck.endswith('de') or fuck.endswith('dl'):
                             paras_delta[fuck] = v * (self.T - 298) / 100
                     ppf = PPF(ppf_file)
                     ppf.set_nb_paras(paras_delta, delta=True)

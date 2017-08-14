@@ -1,4 +1,4 @@
-from ffoptimizer.ppf import PPF
+from mstools.wrapper.ppf import PPF
 
 ppf = PPF('TEAM_LS.ppf')
 ppf.write('new.ppf')

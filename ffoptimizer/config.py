@@ -4,7 +4,7 @@ from collections import OrderedDict
 
 class MacConfig():
     DFF_ROOT = '/Users/zheng/Projects/DFF/Developing'
-    PACKMOL_BIN = '/Users/zheng/Projects/DFF/Developing/bin32m/Packmol/packmol.exe'
+    PACKMOL_BIN = '/Users/zheng/Projects/DFF/Developing/bin64m/Packmol/packmol.exe'
     GMX_BIN = '/opt/gromacs/2016.3/bin/gmx'
 
     MS_TOOLS_DIR = '/Users/zheng/Projects/msd-server'

@@ -1,18 +1,16 @@
+import json
 import os
+import shutil
 import sys
 import time
-import shutil
-import json
 from collections import OrderedDict
 
 import numpy as np
 from lmfit import Parameters, Minimizer
-
-from .ppf import PPF
-from .db import DB
-from .models import Task, Target, Result
-
 from sqlalchemy import and_
+
+from .db import DB
+from .models import Task, Target, Result, PPF
 
 
 class Optimizer():
@@ -20,6 +18,7 @@ class Optimizer():
         self.db = DB(db_file)
         self.db.conn()
         self.CWD = os.getcwd()
+        self.n_parallel = 8
 
     def init_task(self, task_name, data_file, ppf_file, work_dir):
         task = self.db.session.query(Task).filter(Task.name == task_name).first()
@@ -47,7 +46,7 @@ class Optimizer():
             target.name = words[0]
             target.smiles = words[1]
             target.T = int(words[2])
-            target.P = int(float(words[3]) * 1E5)
+            target.P = int(words[3])
             target.density = float(words[4])
             target.wDens = float(words[5])
             target.hvap = float(words[6])
@@ -72,6 +71,10 @@ class Optimizer():
             print('Error: Task %s not exist' % task_name)
             sys.exit(0)
 
+        if ppf_file is not None:
+            ppf = PPF(ppf_file)
+            task.ppf = str(ppf)
+
         for target in task.targets:
             try:
                 files = os.listdir(target.dir_base_npt)
@@ -85,10 +88,6 @@ class Optimizer():
         task.results.delete()
         task.iteration = 0
         self.db.session.commit()
-
-        if ppf_file is not None:
-            ppf = PPF(ppf_file)
-            task.ppf = str(ppf)
 
     def remove_task(self, task_name):
         task = self.db.session.query(Task).filter(Task.name == task_name).first()
@@ -108,7 +107,7 @@ class Optimizer():
 
     def optimize(self, task_name, torsions=None, modify_torsions=None,
                  weight_expansivity=0, penalty_sigma=0, penalty_epsilon=0, penalty_charge=0,
-                 dr_atoms=[], de_atoms=[]):
+                 dr_atoms={}, de_atoms={}, dl_atoms={}):
         task = self.db.session.query(Task).filter(Task.name == task_name).first()
         if task is None:
             print('Error: Task %s not exist' % task_name)
@@ -157,12 +156,13 @@ class Optimizer():
 
             # TODO fit several torsions iteratively. More torsion to fit, more cycles. This is inefficient
             if torsions is not None:
+                from .config import Config
                 for i in range(len(torsions)):
                     for torsion in torsions:
-                        print('Fit torsion based on new non-bonded parameters. Cycle %i / %i ...' % (
-                            i + 1, len(torsions)))
+                        print('Fit torsion based on new non-bonded parameters. Cycle %i / %i ...'
+                              % (i + 1, len(torsions)))
                         print(torsion)
-                        ppf.fit_torsion(torsion[0], torsion[1], torsion[2], torsion[3])
+                        ppf.fit_torsion(Config.DFF_ROOT, torsion[0], torsion[1], torsion[2], torsion[3])
             if modify_torsions is not None:
                 for torsion in modify_torsions:
                     ppf.modify_torsion(torsion[0], torsion[1], torsion[2])
@@ -192,12 +192,12 @@ class Optimizer():
 
                 if gtx_dirs != []:
                     from .models import npt
-                    commands_list = npt.gmx.generate_gpu_multidir_cmds(gtx_dirs, gtx_cmds, n_parallel=4)
+                    commands_list = npt.gmx.generate_gpu_multidir_cmds(gtx_dirs, gtx_cmds, n_parallel=self.n_parallel)
                     npt.jobmanager.queue = 'gtx'
                     npt.jobmanager.nprocs = 2
                     for i, commands in enumerate(commands_list):
                         sh = os.path.join(task.dir, '_job.multi-%i.sh' % i)
-                        npt.jobmanager.generate_sh(task.dir, commands, name='NPT-GTX-%i-%i' % (task.iteration, i),
+                        npt.jobmanager.generate_sh(task.dir, commands, name='%s-%i-%i' % (task.name, task.iteration, i),
                                                    sh=sh)
                         npt.jobmanager.submit(sh)
 
@@ -209,6 +209,8 @@ class Optimizer():
                     print(current_time + ' Job still running. Wait ...')
                     time.sleep(60)
 
+            Dens = []
+            Hvap = []
             R_dens = []
             R_hvap = []
             targets = task.targets.all()
@@ -216,6 +218,8 @@ class Optimizer():
                 dens, hvap = target.get_npt_result()
                 R_dens.append((dens - target.density) / target.density * 100 * target.wDens)  # deviation  percent
                 R_hvap.append((hvap - target.hvap) / target.hvap * 100 * target.wHvap)  # deviation percent
+                Dens.append(dens)
+                Hvap.append(hvap)
             R = R_dens + R_hvap
             os.chdir(self.CWD)
 
@@ -236,10 +240,10 @@ class Optimizer():
             for k, v in params.items():
                 if k.endswith('r0') or k.endswith('e0'):
                     res = (v.value - adj_nb_paras[k]) / adj_nb_paras[k]
-                elif k.endswith('dr') or k.endswith('de'):
-                    res = v.value
-                else:
+                elif k.endswith('bi'):
                     res = v.value - adj_nb_paras[k]
+                else:
+                    res = v.value
                 penalty = get_penalty_for_para(k)
                 R_pena.append(res * penalty * np.sqrt(len(R_dens)))
             R += R_pena
@@ -259,28 +263,30 @@ class Optimizer():
             txt += '\nPARAMETERS:\n'
             for k, v in params.items():
                 txt += '%10.5f  %s\n' % (v.value, k)
-            txt += '\n%8s %8s %10s %8s %8s %3s %5s %s %s\n' % (
-                'RESIDUAL', 'Property', 'Deviation', 'Expt.', 'Weight', 'T', 'P', 'Molecule', 'SMILES')
+            txt += '\n%8s %8s %10s %8s %8s %8s %3s %3s %s %s\n' % (
+                'RESIDUAL', 'Property', 'Deviation', 'Expt.', 'Simu.', 'Weight', 'T', 'P', 'Molecule', 'SMILES')
             for i, r in enumerate(R_dens):
                 target = targets[i]
                 prop = 'density'
                 weight = target.wDens
-                txt += '%8.2f %8s %8.2f %% %8.3f %8.2f %3i %5.1f %s %s\n' % (
-                    r, prop, r / weight, target.density, weight, target.T, target.P / 1E5, target.name, target.smiles)
+                txt += '%8.2f %8s %8.2f %% %8.3f %8.3f %8.2f %3i %3i %s %s\n' % (
+                    r, prop, r / weight, target.density, Dens[i], weight, target.T, target.P, target.name,
+                    target.smiles)
             for i, r in enumerate(R_hvap):
                 target = targets[i]
                 prop = 'hvap'
                 weight = target.wHvap
-                txt += '%8.2f %8s %8.2f %% %8.1f %8.2f %3i %5.1f %s %s\n' % (
-                    r, prop, r / weight, target.hvap, weight, target.T, target.P / 1E5, target.name, target.smiles)
+                txt += '%8.2f %8s %8.2f %% %8.1f %8.1f %8.2f %3i %3i %s %s\n' % (
+                    r, prop, r / weight, target.hvap, Hvap[i], weight, target.T, target.P, target.name,
+                    target.smiles)
 
             if weight_expansivity != 0:
                 for i, r in enumerate(R_expa):
                     target = targets[i * 2]
                     prop = 'expan'
                     weight = weight_expansivity
-                    txt += '%8.2f %8s %8.2f %% %8s %8.2f %3s %5s %s %s\n' % (
-                        r, prop, r / weight, '', weight, '', '', target.name, target.smiles)
+                    txt += '%8.2f %8s %8.2f %% %8s %8s %8.2f %3s %3s %s %s\n' % (
+                        r, prop, r / weight, '', '', weight, '', '', target.name, target.smiles)
 
             for i, r in enumerate(R_pena):
                 prop = 'penalty'
@@ -407,13 +413,19 @@ class Optimizer():
             params.add(k, value=v, min=bound[0], max=bound[1])
 
         ### temperature dependence
-        for atom in dr_atoms:
-            params.add(atom + '_dr', value=0, min=-0.3, max=0.3)
-        for atom in de_atoms:
-            params.add(atom + '_de', value=0, min=-0.015, max=0.015)
+        # for atom in dr_atoms:
+        #     params.add(atom + '_dr', value=0, min=-0.3, max=0.3)
+        # for atom in de_atoms:
+        #     params.add(atom + '_de', value=0, min=-0.01, max=0.01)
+        for k, v in dr_atoms.items():
+            params.add(k + '_dr', value=v, min=-0.1, max=0.1)
+        for k, v in de_atoms.items():
+            params.add(k + '_de', value=v, min=-0.2, max=0.2)
+        for k, v in dl_atoms.items():
+            params.add(k + '_dl', value=v, min=-0.2, max=0.2)
 
         minimize = Minimizer(residual, params, iter_cb=callback)
-        result = minimize.leastsq(Dfun=jacobian, ftol=0.001)
+        result = minimize.leastsq(Dfun=jacobian, ftol=0.005)
         print(result.lmdif_message, '\n')
 
         return result.params
