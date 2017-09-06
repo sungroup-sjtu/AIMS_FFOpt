@@ -109,7 +109,7 @@ class Target(Base):
     def dir(self):
         return os.path.join(self.dir_base_npt, '%i-%i-%i' % (self.T, self.P, self.task.iteration))
 
-    def run_npt(self, ppf_file=None, paras_diff: OrderedDict = None) -> [str]:
+    def run_npt(self, ppf_file=None, paras_diff: OrderedDict = None, drde_dict: {} = None) -> [str]:
         cd_or_create_and_cd(self.dir_base_npt)
 
         if not os.path.exists('init.msd'):
@@ -129,10 +129,13 @@ class Target(Base):
 
         shutil.copy('../init.msd', npt.msd)
 
-        ### temperature dependence of epsilon
+        ### temperature dependence
         if paras_diff is not None:
             paras = copy.copy(paras_diff)
-            paras.update({'all_dr': -0.01, 'all_de': 0.056})
+            if drde_dict is not None:
+                for k, v in drde_dict.items():
+                    if k not in paras.keys():
+                        paras[k] = v
             for k, v in paras.items():
                 if k.endswith('dr') or k.endswith('de') or k.endswith('dl'):
                     paras[k] = v * (self.T - 298) / 100
@@ -157,10 +160,10 @@ class Target(Base):
             nprocs = npt.jobmanager.nprocs
 
             import multiprocessing
-            def worker(k, return_dict):
+            def worker(key, return_dict):
                 worker_commands = []
                 for i in [-1, 1]:
-                    basename = 'diff%i.%s' % (i, k)
+                    basename = 'diff%i.%s' % (i, key)
                     ppf_diff = basename + '.ppf'
                     msd_diff = basename + '.msd'
                     gro_diff = basename + '.gro'
@@ -169,8 +172,11 @@ class Target(Base):
 
                     ### temperature dependence
                     paras_delta = copy.copy(paras_diff)
-                    paras_delta[k] += PPF.get_delta_for_para(k) * i
-                    paras_delta.update({'all_dr': -0.01, 'all_de': 0.056})
+                    paras_delta[key] += PPF.get_delta_for_para(key) * i
+                    if drde_dict is not None:
+                        for fuck, v in drde_dict.items():
+                            if fuck not in paras_delta.keys():
+                                paras_delta[fuck] = v
                     for fuck, v in paras_delta.items():
                         if fuck.endswith('dr') or fuck.endswith('de') or fuck.endswith('dl'):
                             paras_delta[fuck] = v * (self.T - 298) / 100
@@ -202,7 +208,7 @@ class Target(Base):
                     os.remove(basename + '.dfi')
                     os.remove(basename + '.dfo')
 
-                return_dict[k] = worker_commands
+                return_dict[key] = worker_commands
 
             manager = multiprocessing.Manager()
             return_dict = manager.dict()

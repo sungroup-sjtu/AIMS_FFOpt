@@ -19,6 +19,7 @@ class Optimizer():
         self.db.conn()
         self.CWD = os.getcwd()
         self.n_parallel = 8
+        self.drde_dict = {}
 
     def init_task(self, task_name, data_file, ppf_file, work_dir):
         task = self.db.session.query(Task).filter(Task.name == task_name).first()
@@ -154,15 +155,14 @@ class Optimizer():
                 paras[k] = v.value
             ppf.set_nb_paras(paras)
 
-            # TODO fit several torsions iteratively. More torsion to fit, more cycles. This is inefficient
+            # TODO fit several torsions one by one
             if torsions is not None:
                 from .config import Config
-                for i in range(len(torsions)):
-                    for torsion in torsions:
-                        print('Fit torsion based on new non-bonded parameters. Cycle %i / %i ...'
-                              % (i + 1, len(torsions)))
-                        print(torsion)
-                        ppf.fit_torsion(Config.DFF_ROOT, torsion[0], torsion[1], torsion[2], torsion[3])
+                print('Fit torsion based on new non-bonded parameters')
+                for n, torsion in enumerate(torsions):
+                    print(torsion)
+                    ppf.fit_torsion(Config.DFF_ROOT, torsion[0], torsion[1], torsion[2], torsion[3],
+                                    dfi_name='fit_torsion-%i' % n)
             if modify_torsions is not None:
                 for torsion in modify_torsions:
                     ppf.modify_torsion(torsion[0], torsion[1], torsion[2])
@@ -182,7 +182,7 @@ class Optimizer():
                 for target in task.targets:
                     if target.npt_started():
                         continue
-                    cmds = target.run_npt(ppf_out, paras)
+                    cmds = target.run_npt(ppf_out, paras, drde_dict=self.drde_dict)
                     ### save gtx_dirs and gtx_cmds for running jobs on gtx queue
                     if cmds != []:
                         gtx_dirs.append(target.dir)
@@ -418,11 +418,11 @@ class Optimizer():
         # for atom in de_atoms:
         #     params.add(atom + '_de', value=0, min=-0.01, max=0.01)
         for k, v in dr_atoms.items():
-            params.add(k + '_dr', value=v, min=-0.1, max=0.1)
+            params.add(k + '_dr', value=v, min=-0.1, max=0.05)
         for k, v in de_atoms.items():
-            params.add(k + '_de', value=v, min=-0.2, max=0.2)
+            params.add(k + '_de', value=v, min=-0.1, max=0.2)
         for k, v in dl_atoms.items():
-            params.add(k + '_dl', value=v, min=-0.2, max=0.2)
+            params.add(k + '_dl', value=v, min=-0.1, max=0.2)
 
         minimize = Minimizer(residual, params, iter_cb=callback)
         result = minimize.leastsq(Dfun=jacobian, ftol=0.005)

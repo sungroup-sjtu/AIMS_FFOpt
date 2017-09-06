@@ -39,14 +39,26 @@ if __name__ == '__main__':
         if len(sys.argv) > 3:
             optimizer.n_parallel = int(sys.argv[3])
 
+        # torsion parameters to be optimized
         torsions = [
             ('C2-MP2.qmd', 'C2.msd', 'TORS H5 C1 C2 H6 500.0 60.0 15.0 12', 'h_1, c_4, c_4, h_1'),
             ('C6-MP2.qmd', 'C6.msd', 'TORS C5 C8 C11 C14 500.0 180.0 10.0 18', 'c_4, c_4, c_4, c_4'),
         ]
 
+        # torsion parameters to be modified
         modify_torsions = [
             # ('c_4, c_4, c_4, c_4', 2, 0.1),
         ]
+
+        # temperature dependent LJ parameters
+        optimizer.drde_dict = {
+            'h_1_dr': -0.01,
+            'h_1_de': 0.056,
+            'c_4_dr': -0.01,
+            'c_4_de': 0.056,
+            'c_3_dr': -0.004,
+            'c_3_de': 0.005,
+        }
 
         optimizer.optimize(task_name=sys.argv[2],
                            torsions=torsions,
