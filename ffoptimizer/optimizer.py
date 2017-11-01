@@ -3,6 +3,7 @@ import os
 import shutil
 import sys
 import time
+import copy
 from collections import OrderedDict
 
 import numpy as np
@@ -11,6 +12,7 @@ from sqlalchemy import and_
 
 from .db import DB
 from .models import Task, Target, Result, PPF
+from .para_tool import get_bound_for_para
 
 
 class Optimizer():
@@ -73,16 +75,21 @@ class Optimizer():
             sys.exit(0)
 
         if ppf_file is not None:
+            cycle = 0
             ppf = PPF(ppf_file)
             task.ppf = str(ppf)
+        else:
+            cycle = 1
 
         for target in task.targets:
             try:
                 files = os.listdir(target.dir_base_npt)
-                for filename in files:
-                    filepath = os.path.join(target.dir_base_npt, filename)
-                    if os.path.isdir(filepath) and not filepath.endswith('-1'):
-                        shutil.rmtree(filepath)
+                for fname in files:
+                    fpath = os.path.join(target.dir_base_npt, fname)
+                    if os.path.isdir(fpath):
+                        dircycle = int(fname.split('-')[-1])
+                        if dircycle > cycle:
+                            shutil.rmtree(fpath)
             except Exception as e:
                 print(str(e))
 
@@ -107,8 +114,9 @@ class Optimizer():
         self.db.session.commit()
 
     def optimize(self, task_name, torsions=None, modify_torsions=None,
-                 weight_expansivity=0, penalty_sigma=0, penalty_epsilon=0, penalty_charge=0,
-                 dr_atoms={}, de_atoms={}, dl_atoms={}):
+                 weight_expansivity=0, weight_expan_hvap=0,
+                 penalty_sigma=0, penalty_epsilon=0, penalty_charge=0,
+                 drde_atoms={}):
         task = self.db.session.query(Task).filter(Task.name == task_name).first()
         if task is None:
             print('Error: Task %s not exist' % task_name)
@@ -156,13 +164,13 @@ class Optimizer():
             ppf.set_nb_paras(paras)
 
             # TODO fit several torsions one by one
-            if torsions is not None:
+            if torsions is not None and len(torsions) > 1:
                 from .config import Config
                 print('Fit torsion based on new non-bonded parameters')
                 for n, torsion in enumerate(torsions):
                     print(torsion)
                     ppf.fit_torsion(Config.DFF_ROOT, torsion[0], torsion[1], torsion[2], torsion[3],
-                                    dfi_name='fit_torsion-%i' % n)
+                                    dfi_name='fit_torsion-%i-%i' % (task.iteration + 1, n))
             if modify_torsions is not None:
                 for torsion in modify_torsions:
                     ppf.modify_torsion(torsion[0], torsion[1], torsion[2])
@@ -223,7 +231,7 @@ class Optimizer():
             R = R_dens + R_hvap
             os.chdir(self.CWD)
 
-            ### thermal expansivity
+            ### expansivity
             if weight_expansivity != 0:
                 R_expa = []
                 for i_mol in range(len(targets) // 2):
@@ -234,6 +242,18 @@ class Optimizer():
                     R_expa.append(res_Kt)
 
                 R += R_expa
+
+            ### slope of Hvap-T
+            if weight_expan_hvap != 0:
+                R_expa_hvap = []
+                for i_mol in range(len(targets) // 2):
+                    target_T1 = targets[2 * i_mol]
+                    target_T2 = targets[2 * i_mol + 1]
+                    res_expan_hvap = ((target_T1.sim_hvap - target_T2.sim_hvap) / (target_T1.hvap - target_T2.hvap) - 1) \
+                                     * 100 * weight_expan_hvap
+                    R_expa_hvap.append(res_expan_hvap)
+
+                R += R_expa_hvap
 
             # parameter penalty
             R_pena = []
@@ -261,8 +281,10 @@ class Optimizer():
             ### write current parameters and residual to log
             txt = '\nITERATION %i, RSQ %.2f\n' % (task.iteration, np.sum(list(map(lambda x: x ** 2, R))))
             txt += '\nPARAMETERS:\n'
+            for k, v in self.drde_dict.items():
+                txt += '%10.5f  %-12s  Fixed\n' % (v, k)
             for k, v in params.items():
-                txt += '%10.5f  %s\n' % (v.value, k)
+                txt += '%10.5f  %-12s  %10.5f\n' % (v.value, k, init_params[k])
             txt += '\n%8s %8s %10s %8s %8s %8s %3s %3s %s %s\n' % (
                 'RESIDUAL', 'Property', 'Deviation', 'Expt.', 'Simu.', 'Weight', 'T', 'P', 'Molecule', 'SMILES')
             for i, r in enumerate(R_dens):
@@ -288,9 +310,18 @@ class Optimizer():
                     txt += '%8.2f %8s %8.2f %% %8s %8s %8.2f %3s %3s %s %s\n' % (
                         r, prop, r / weight, '', '', weight, '', '', target.name, target.smiles)
 
+            if weight_expan_hvap != 0:
+                for i, r in enumerate(R_expa_hvap):
+                    target = targets[i * 2]
+                    prop = 'hvap-T'
+                    weight = weight_expan_hvap
+                    txt += '%8.2f %8s %8.2f %% %8s %8s %8.2f %3s %3s %s %s\n' % (
+                        r, prop, r / weight, '', '', weight, '', '', target.name, target.smiles)
+
             for i, r in enumerate(R_pena):
                 prop = 'penalty'
-                txt += '%8.2f %8s %10s\n' % (r, prop, list(params.keys())[i])
+                k = list(params.keys())[i]
+                txt += '%8.2f %8s %10s %8s %8s %8.2f\n' % (r, prop, k, '', '', get_penalty_for_para(k))
 
             print(txt)
             with open(LOG, 'a') as log:
@@ -326,7 +357,7 @@ class Optimizer():
             J = J_dens + J_hvap
             os.chdir(self.CWD)
 
-            ### thermal expansivity
+            ### expansivity
             if weight_expansivity != 0:
                 J_expa = []
                 for i_mol in range(len(targets) // 2):
@@ -337,6 +368,18 @@ class Optimizer():
                     J_expa.append(list(dExpa))
 
                 J += J_expa
+
+            ### slope of Hvap-T
+            if weight_expan_hvap != 0:
+                J_expa_hvap = []
+                for i_mol in range(len(targets) // 2):
+                    target_T1 = targets[2 * i_mol]
+                    target_T2 = targets[2 * i_mol + 1]
+                    dExpa_hvap = (target_T1.dHdp_array - target_T2.dHdp_array) / (target_T1.hvap - target_T2.hvap) \
+                                 * 100 * weight_expan_hvap
+                    J_expa_hvap.append(list(dExpa_hvap))
+
+                J += J_expa_hvap
 
             ### parameter penalty
             J_pena = []
@@ -387,6 +430,14 @@ class Optimizer():
                         txt += '%10.2f' % item
                     txt += ' %8s %s\n' % (prop, name)
 
+            if weight_expan_hvap != 0:
+                for i, row in enumerate(J_expa_hvap):
+                    name = targets[2 * i].name
+                    prop = 'hvap-T'
+                    for item in row:
+                        txt += '%10.2f' % item
+                    txt += ' %8s %s\n' % (prop, name)
+
             for i, row in enumerate(J_pena):
                 name = list(params.keys())[i]
                 prop = 'penalty'
@@ -409,23 +460,17 @@ class Optimizer():
         adj_nb_paras = ppf.get_adj_nb_paras()
         params = Parameters()
         for k, v in adj_nb_paras.items():
-            bound = PPF.get_bound_for_para(k)
+            bound = get_bound_for_para(k)
             params.add(k, value=v, min=bound[0], max=bound[1])
 
-        ### temperature dependence
-        # for atom in dr_atoms:
-        #     params.add(atom + '_dr', value=0, min=-0.3, max=0.3)
-        # for atom in de_atoms:
-        #     params.add(atom + '_de', value=0, min=-0.01, max=0.01)
-        for k, v in dr_atoms.items():
-            params.add(k + '_dr', value=v, min=-0.1, max=0.05)
-        for k, v in de_atoms.items():
-            params.add(k + '_de', value=v, min=-0.1, max=0.2)
-        for k, v in dl_atoms.items():
-            params.add(k + '_dl', value=v, min=-0.1, max=0.2)
+        ### drde_atoms for temperature dependence
+        for k, v in drde_atoms.items():
+            bound = get_bound_for_para(k)
+            params.add(k, value=v, min=bound[0], max=bound[1])
 
+        init_params = copy.copy(params)
         minimize = Minimizer(residual, params, iter_cb=callback)
-        result = minimize.leastsq(Dfun=jacobian, ftol=0.005)
+        result = minimize.leastsq(Dfun=jacobian, ftol=0.001)
         print(result.lmdif_message, '\n')
 
         return result.params

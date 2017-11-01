@@ -20,6 +20,7 @@ from sqlalchemy.ext.declarative import declarative_base
 Base = declarative_base()
 metadata = Base.metadata
 
+from .para_tool import get_delta_for_para
 from .config import Config
 
 sys.path.append(Config.MS_TOOLS_DIR)
@@ -38,7 +39,7 @@ elif Config.JOB_MANAGER == 'slurm':
 else:
     raise Exception('Job manager not supported')
 
-kwargs = {'packmol_bin': Config.PACKMOL_BIN, 'dff_root': Config.DFF_ROOT,
+kwargs = {'packmol_bin': Config.PACKMOL_BIN, 'dff_root': Config.DFF_ROOT, 'dff_table': Config.DFF_TABLE,
           'gmx_bin': Config.GMX_BIN, 'jobmanager': jobmanager}
 npt = Npt(**kwargs)
 
@@ -139,6 +140,8 @@ class Target(Base):
             for k, v in paras.items():
                 if k.endswith('dr') or k.endswith('de') or k.endswith('dl'):
                     paras[k] = v * (self.T - 298) / 100
+                elif k.endswith('d2'):
+                    paras[k] = v * ((self.T - 298) / 100 - ((self.T - 298) / 100) ** 2 * 0.1)
             ppf = PPF(ppf_file)
             ppf.set_nb_paras(paras, delta=True)
             ppf_run = 'run.ppf'
@@ -172,7 +175,7 @@ class Target(Base):
 
                     ### temperature dependence
                     paras_delta = copy.copy(paras_diff)
-                    paras_delta[key] += PPF.get_delta_for_para(key) * i
+                    paras_delta[key] += get_delta_for_para(key) * i
                     if drde_dict is not None:
                         for fuck, v in drde_dict.items():
                             if fuck not in paras_delta.keys():
@@ -180,6 +183,9 @@ class Target(Base):
                     for fuck, v in paras_delta.items():
                         if fuck.endswith('dr') or fuck.endswith('de') or fuck.endswith('dl'):
                             paras_delta[fuck] = v * (self.T - 298) / 100
+                        elif fuck.endswith('d2'):
+                            paras_delta[fuck] = v * ((self.T - 298) / 100 - ((self.T - 298) / 100) ** 2 * 0.1)
+
                     ppf = PPF(ppf_file)
                     ppf.set_nb_paras(paras_delta, delta=True)
                     ppf.write(ppf_diff)
@@ -199,7 +205,8 @@ class Target(Base):
                     cmd = npt.gmx.grompp(mdp='diff.mdp', top=top_diff_hvap, tpr_out=basename + '-hvap.tpr',
                                          get_cmd=True)
                     worker_commands.append(cmd)
-                    cmd = npt.gmx.mdrun(name=basename + '-hvap', nprocs=nprocs, rerun='npt.trr', get_cmd=True)
+                    cmd = npt.gmx.mdrun(name=basename + '-hvap', nprocs=nprocs, n_thread=nprocs, rerun='npt.trr',
+                                        get_cmd=True)
                     worker_commands.append(cmd)
 
                     os.remove(ppf_diff)
@@ -241,9 +248,10 @@ class Target(Base):
 
         df = panedr.edr_to_df('npt.edr')
         density = df.Density.mean() / 1000  # convert to g/mL
-        self.sim_dens = density  # save self.sim_dens for calculating thermal expansivity
         df = panedr.edr_to_df('hvap.edr')
         hvap = self.RT - df.Potential.mean() / self.n_mol
+        self.sim_dens = density  # save self.sim_dens for calculating expansivity
+        self.sim_hvap = hvap  # save self.sim_hvap for calculating expan_hvap
 
         return density, hvap
 
@@ -262,7 +270,8 @@ class Target(Base):
             dDdp, dHdp = self.get_dDens_dHvap_from_para(k)
             dDdp_list.append(dDdp)
             dHdp_list.append(dHdp)
-        self.dDdp_array = np.array(dDdp_list)  # save dDdp_array for calculating thermal expansivity
+        self.dDdp_array = np.array(dDdp_list)  # save dDdp_array for calculating expansivity
+        self.dHdp_array = np.array(dHdp_list)  # save dHdp_array for calculating expan_hvap
 
         return dDdp_list, dHdp_list
 
@@ -283,7 +292,7 @@ class Target(Base):
         hvap_array_diff_n = np.array(self.RT - df.Potential / self.n_mol)
 
         # calculate the derivative series dA/dp
-        delta = PPF.get_delta_for_para(k)
+        delta = get_delta_for_para(k)
         dPene_array = (pene_array_diff_p - pene_array_diff_n) / delta / 2
         dHvap_array = (hvap_array_diff_p - hvap_array_diff_n) / delta / 2
 
