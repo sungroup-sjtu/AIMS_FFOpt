@@ -12,7 +12,7 @@ from sqlalchemy import and_
 
 from .db import DB
 from .models import Task, Target, Result, PPF
-from .para_tool import get_bound_for_para
+from .para_tool import get_bound_for_para, replace_para_name, restore_para_name
 
 
 class Optimizer():
@@ -22,6 +22,7 @@ class Optimizer():
         self.CWD = os.getcwd()
         self.n_parallel = 8
         self.drde_dict = {}
+        self.max_iter = 9
 
     def init_task(self, task_name, data_file, ppf_file, work_dir):
         task = self.db.session.query(Task).filter(Task.name == task_name).first()
@@ -54,6 +55,21 @@ class Optimizer():
             target.wDens = float(words[5])
             target.hvap = float(words[6])
             target.wHvap = float(words[7])
+
+            if len(words) > 8:
+                target.st = float(words[8])
+                target.wST = float(words[9])
+            else:
+                target.st = 0
+                target.wST = 0
+
+            if target.density == 0:
+                target.wDens = 0
+            if target.hvap == 0:
+                target.wHvap = 0
+            if target.st == 0:
+                target.wST = 0
+
             target.calc_n_mol()
             self.db.session.add(target)
 
@@ -90,6 +106,13 @@ class Optimizer():
                         dircycle = int(fname.split('-')[-1])
                         if dircycle > cycle:
                             shutil.rmtree(fpath)
+                files = os.listdir(target.dir_base_slab)
+                for fname in files:
+                    fpath = os.path.join(target.dir_base_slab, fname)
+                    if os.path.isdir(fpath):
+                        dircycle = int(fname.split('-')[-1])
+                        if dircycle > cycle:
+                            shutil.rmtree(fpath)
             except Exception as e:
                 print(str(e))
 
@@ -113,8 +136,8 @@ class Optimizer():
         self.db.session.delete(task)
         self.db.session.commit()
 
-    def optimize(self, task_name, torsions=None, modify_torsions=None,
-                 weight_expansivity=0, weight_expan_hvap=0,
+    def optimize(self, task_name, max_iter=None, torsions=None, modify_torsions=None,
+                 weight_expansivity=0,
                  penalty_sigma=0, penalty_epsilon=0, penalty_charge=0,
                  drde_atoms={}):
         task = self.db.session.query(Task).filter(Task.name == task_name).first()
@@ -125,6 +148,9 @@ class Optimizer():
         if task.iteration != 0:
             print('Error: This task has been optimized before')
             sys.exit(0)
+
+        if max_iter != None:
+            self.max_iter = max_iter
 
         LOG = os.path.join(self.CWD, '%s.log' % task_name)
 
@@ -160,11 +186,11 @@ class Optimizer():
             paras = OrderedDict()
             for k, v in params.items():
                 print(v)
-                paras[k] = v.value
+                paras[restore_para_name(k)] = v.value
             ppf.set_nb_paras(paras)
 
-            # TODO fit several torsions one by one
-            if torsions is not None and len(torsions) > 1:
+            # TODO Fit several torsions one by one
+            if torsions is not None and len(torsions) > 0:
                 from .config import Config
                 print('Fit torsion based on new non-bonded parameters')
                 for n, torsion in enumerate(torsions):
@@ -188,29 +214,80 @@ class Optimizer():
                 gtx_cmds = []
                 ###
                 for target in task.targets:
+                    if not target.need_npt:
+                        continue
                     if target.npt_started():
                         continue
                     cmds = target.run_npt(ppf_out, paras, drde_dict=self.drde_dict)
                     ### save gtx_dirs and gtx_cmds for running jobs on gtx queue
                     if cmds != []:
-                        gtx_dirs.append(target.dir)
+                        gtx_dirs.append(target.dir_npt)
                         gtx_cmds = cmds
 
                 os.chdir(self.CWD)
 
                 if gtx_dirs != []:
-                    from .models import npt
+                    from .models import npt, jobmanager
                     commands_list = npt.gmx.generate_gpu_multidir_cmds(gtx_dirs, gtx_cmds, n_parallel=self.n_parallel)
-                    npt.jobmanager.queue = 'gtx'
-                    npt.jobmanager.nprocs = 2
                     for i, commands in enumerate(commands_list):
-                        sh = os.path.join(task.dir, '_job.multi-%i.sh' % i)
-                        npt.jobmanager.generate_sh(task.dir, commands, name='%s-%i-%i' % (task.name, task.iteration, i),
-                                                   sh=sh)
-                        npt.jobmanager.submit(sh)
+                        sh = os.path.join(task.dir, '_job.npt-%i.sh' % i)
+                        jobmanager.generate_sh(task.dir, commands,
+                                               name='%s-%i-%i' % (task.name, task.iteration, i), sh=sh)
+                        jobmanager.submit(sh)
+
+            if not task.vacuum_started():
+                gtx_dirs = []
+                gtx_cmds = []
+                for target in task.targets:
+                    if not target.need_vacuum:
+                        continue
+                    if target.vacuum_started():
+                        continue
+                    cmds = target.run_vacuum(ppf_out, paras, drde_dict=self.drde_dict)
+                    ### save gtx_dirs and gtx_cmds for running jobs on gtx queue
+                    if cmds != []:
+                        gtx_dirs.append(target.dir_vacuum)
+                        gtx_cmds = cmds
+
+                os.chdir(self.CWD)
+
+                if gtx_dirs != []:
+                    from .models import vacuum, jobmanager
+                    commands_list = vacuum.gmx.generate_gpu_multidir_cmds(gtx_dirs, gtx_cmds,
+                                                                          n_parallel=self.n_parallel)
+                    for i, commands in enumerate(commands_list):
+                        sh = os.path.join(task.dir, '_job.vacuum-%i.sh' % i)
+                        jobmanager.generate_sh(task.dir, commands,
+                                               name='%s-%i-VAC%i' % (task.name, task.iteration, i), sh=sh)
+                        jobmanager.submit(sh)
+
+            if not task.slab_started():
+                gtx_dirs = []
+                gtx_cmds = []
+                for target in task.targets:
+                    if not target.need_slab:
+                        continue
+                    if target.slab_started():
+                        continue
+                    cmds = target.run_slab(ppf_out, paras, drde_dict=self.drde_dict)
+                    ### save gtx_dirs and gtx_cmds for running jobs on gtx queue
+                    if cmds != []:
+                        gtx_dirs.append(target.dir_slab)
+                        gtx_cmds = cmds
+
+                os.chdir(self.CWD)
+
+                if gtx_dirs != []:
+                    from .models import slab, jobmanager
+                    commands_list = slab.gmx.generate_gpu_multidir_cmds(gtx_dirs, gtx_cmds, n_parallel=self.n_parallel)
+                    for i, commands in enumerate(commands_list):
+                        sh = os.path.join(task.dir, '_job.slab-%i.sh' % i)
+                        jobmanager.generate_sh(task.dir, commands,
+                                               name='%s-%i-SLA%i' % (task.name, task.iteration, i), sh=sh)
+                        jobmanager.submit(sh)
 
             while True:
-                if task.npt_finished():
+                if task.npt_finished() and task.vacuum_finished() and task.slab_finished():
                     break
                 else:
                     current_time = time.strftime('%m-%d %H:%M')
@@ -219,16 +296,25 @@ class Optimizer():
 
             Dens = []
             Hvap = []
+            ST = []
             R_dens = []
             R_hvap = []
+            R_st = []
             targets = task.targets.all()
             for target in targets:
-                dens, hvap = target.get_npt_result()
-                R_dens.append((dens - target.density) / target.density * 100 * target.wDens)  # deviation  percent
-                R_hvap.append((hvap - target.hvap) / target.hvap * 100 * target.wHvap)  # deviation percent
-                Dens.append(dens)
-                Hvap.append(hvap)
-            R = R_dens + R_hvap
+                if target.wDens > 1E-4:
+                    dens = target.get_density()
+                    R_dens.append((dens - target.density) / target.density * 100 * target.wDens)  # deviation  percent
+                    Dens.append(dens)
+                if target.wHvap > 1E-4:
+                    hvap = target.get_hvap()
+                    R_hvap.append((hvap - target.hvap) / target.hvap * 100 * target.wHvap)  # deviation percent
+                    Hvap.append(hvap)
+                if target.wST > 1E-4:
+                    st = target.get_slab_result()
+                    R_st.append((st - target.st) / target.st * 100 * target.wST)  # deviation percent
+                    ST.append(st)
+            R = R_dens + R_hvap + R_st
             os.chdir(self.CWD)
 
             ### expansivity
@@ -243,25 +329,13 @@ class Optimizer():
 
                 R += R_expa
 
-            ### slope of Hvap-T
-            if weight_expan_hvap != 0:
-                R_expa_hvap = []
-                for i_mol in range(len(targets) // 2):
-                    target_T1 = targets[2 * i_mol]
-                    target_T2 = targets[2 * i_mol + 1]
-                    res_expan_hvap = ((target_T1.sim_hvap - target_T2.sim_hvap) / (target_T1.hvap - target_T2.hvap) - 1) \
-                                     * 100 * weight_expan_hvap
-                    R_expa_hvap.append(res_expan_hvap)
-
-                R += R_expa_hvap
-
             # parameter penalty
             R_pena = []
             for k, v in params.items():
                 if k.endswith('r0') or k.endswith('e0'):
-                    res = (v.value - adj_nb_paras[k]) / adj_nb_paras[k]
+                    res = (v.value - adj_nb_paras[restore_para_name(k)]) / adj_nb_paras[restore_para_name(k)]
                 elif k.endswith('bi'):
-                    res = v.value - adj_nb_paras[k]
+                    res = v.value - adj_nb_paras[restore_para_name(k)]
                 else:
                     res = v.value
                 penalty = get_penalty_for_para(k)
@@ -284,22 +358,35 @@ class Optimizer():
             for k, v in self.drde_dict.items():
                 txt += '%10.5f  %-12s  Fixed\n' % (v, k)
             for k, v in params.items():
-                txt += '%10.5f  %-12s  %10.5f\n' % (v.value, k, init_params[k])
+                txt += '%10.5f  %-12s  %10.5f\n' % (v.value, restore_para_name(k), init_params[k])
             txt += '\n%8s %8s %10s %8s %8s %8s %3s %3s %s %s\n' % (
                 'RESIDUAL', 'Property', 'Deviation', 'Expt.', 'Simu.', 'Weight', 'T', 'P', 'Molecule', 'SMILES')
+
+            targets_dens = task.targets.filter(Target.wDens > 1E-4).all()
             for i, r in enumerate(R_dens):
-                target = targets[i]
+                target = targets_dens[i]
                 prop = 'density'
                 weight = target.wDens
                 txt += '%8.2f %8s %8.2f %% %8.3f %8.3f %8.2f %3i %3i %s %s\n' % (
                     r, prop, r / weight, target.density, Dens[i], weight, target.T, target.P, target.name,
                     target.smiles)
+
+            targets_hvap = task.targets.filter(Target.wHvap > 1E-4).all()
             for i, r in enumerate(R_hvap):
-                target = targets[i]
+                target = targets_hvap[i]
                 prop = 'hvap'
                 weight = target.wHvap
                 txt += '%8.2f %8s %8.2f %% %8.1f %8.1f %8.2f %3i %3i %s %s\n' % (
                     r, prop, r / weight, target.hvap, Hvap[i], weight, target.T, target.P, target.name,
+                    target.smiles)
+
+            targets_st = task.targets.filter(Target.wST > 1E-4).all()
+            for i, r in enumerate(R_st):
+                target = targets_st[i]
+                prop = 'st'
+                weight = target.wST
+                txt += '%8.2f %8s %8.2f %% %8.1f %8.1f %8.2f %3i %3i %s %s\n' % (
+                    r, prop, r / weight, target.st, ST[i], weight, target.T, target.P, target.name,
                     target.smiles)
 
             if weight_expansivity != 0:
@@ -307,14 +394,6 @@ class Optimizer():
                     target = targets[i * 2]
                     prop = 'expan'
                     weight = weight_expansivity
-                    txt += '%8.2f %8s %8.2f %% %8s %8s %8.2f %3s %3s %s %s\n' % (
-                        r, prop, r / weight, '', '', weight, '', '', target.name, target.smiles)
-
-            if weight_expan_hvap != 0:
-                for i, r in enumerate(R_expa_hvap):
-                    target = targets[i * 2]
-                    prop = 'hvap-T'
-                    weight = weight_expan_hvap
                     txt += '%8.2f %8s %8.2f %% %8s %8s %8.2f %3s %3s %s %s\n' % (
                         r, prop, r / weight, '', '', weight, '', '', target.name, target.smiles)
 
@@ -345,16 +424,23 @@ class Optimizer():
 
             paras = OrderedDict()
             for k, v in params.items():
-                paras[k] = v.value
+                paras[restore_para_name(k)] = v.value
 
             J_dens = []
             J_hvap = []
+            J_st = []
             targets = task.targets.all()
             for target in targets:
-                dDdp_list, dHdp_list = target.get_dDens_dHvap_list_from_paras(paras)
-                J_dens.append([i / target.density * 100 * target.wDens for i in dDdp_list])  # deviation  percent
-                J_hvap.append([i / target.hvap * 100 * target.wHvap for i in dHdp_list])  # deviation  percent
-            J = J_dens + J_hvap
+                if target.wDens > 1E-4:
+                    dDdp_list = target.get_dDens_list_from_paras(paras)
+                    J_dens.append([i / target.density * 100 * target.wDens for i in dDdp_list])  # deviation  percent
+                if target.wHvap > 1E-4:
+                    dHdp_list = target.get_dHvap_list_from_paras(paras)
+                    J_hvap.append([i / target.hvap * 100 * target.wHvap for i in dHdp_list])  # deviation  percent
+                if target.wST > 1E-4:
+                    dSTdp_list = target.get_dST_list_from_paras(paras)
+                    J_st.append([i / target.st * 100 * target.wST for i in dSTdp_list])  # deviation  percent
+            J = J_dens + J_hvap + J_st
             os.chdir(self.CWD)
 
             ### expansivity
@@ -369,23 +455,11 @@ class Optimizer():
 
                 J += J_expa
 
-            ### slope of Hvap-T
-            if weight_expan_hvap != 0:
-                J_expa_hvap = []
-                for i_mol in range(len(targets) // 2):
-                    target_T1 = targets[2 * i_mol]
-                    target_T2 = targets[2 * i_mol + 1]
-                    dExpa_hvap = (target_T1.dHdp_array - target_T2.dHdp_array) / (target_T1.hvap - target_T2.hvap) \
-                                 * 100 * weight_expan_hvap
-                    J_expa_hvap.append(list(dExpa_hvap))
-
-                J += J_expa_hvap
-
             ### parameter penalty
             J_pena = []
             for k, v in params.items():
                 if k.endswith('r0') or k.endswith('e0'):
-                    d = 1 / adj_nb_paras[k]
+                    d = 1 / adj_nb_paras[restore_para_name(k)]
                 else:
                     d = 1
                 penalty = get_penalty_for_para(k)
@@ -407,17 +481,29 @@ class Optimizer():
             ### write Jacobian to log
             txt = '\nJACOBIAN MATRIX:\n'
             for k in params.keys():
-                txt += '%10s' % k
+                txt += '%10s' % restore_para_name(k)
             txt += '\n'
+
+            targets_dens = task.targets.filter(Target.wDens > 1E-4).all()
             for i, row in enumerate(J_dens):
-                name = targets[i].name
+                name = targets_dens[i].name
                 prop = 'density'
                 for item in row:
                     txt += '%10.2f' % item
                 txt += ' %8s %s\n' % (prop, name)
+
+            targets_hvap = task.targets.filter(Target.wHvap > 1E-4).all()
             for i, row in enumerate(J_hvap):
-                name = targets[i].name
+                name = targets_hvap[i].name
                 prop = 'hvap'
+                for item in row:
+                    txt += '%10.2f' % item
+                txt += ' %8s %s\n' % (prop, name)
+
+            targets_st = task.targets.filter(Target.wST > 1E-4).all()
+            for i, row in enumerate(J_st):
+                name = targets_st[i].name
+                prop = 'st'
                 for item in row:
                     txt += '%10.2f' % item
                 txt += ' %8s %s\n' % (prop, name)
@@ -430,16 +516,8 @@ class Optimizer():
                         txt += '%10.2f' % item
                     txt += ' %8s %s\n' % (prop, name)
 
-            if weight_expan_hvap != 0:
-                for i, row in enumerate(J_expa_hvap):
-                    name = targets[2 * i].name
-                    prop = 'hvap-T'
-                    for item in row:
-                        txt += '%10.2f' % item
-                    txt += ' %8s %s\n' % (prop, name)
-
             for i, row in enumerate(J_pena):
-                name = list(params.keys())[i]
+                name = restore_para_name(list(params.keys())[i])
                 prop = 'penalty'
                 for item in row:
                     txt += '%10.2f' % item
@@ -455,13 +533,15 @@ class Optimizer():
         def callback(params: Parameters, iter: int, res: [float]):
             print('Wait for 3 seconds ...')
             time.sleep(3)
+            if self.max_iter != None and task.iteration >= self.max_iter:
+                return True  # abort optimization
 
         ppf = PPF(string=task.ppf)
         adj_nb_paras = ppf.get_adj_nb_paras()
         params = Parameters()
         for k, v in adj_nb_paras.items():
             bound = get_bound_for_para(k)
-            params.add(k, value=v, min=bound[0], max=bound[1])
+            params.add(replace_para_name(k), value=v, min=bound[0], max=bound[1])
 
         ### drde_atoms for temperature dependence
         for k, v in drde_atoms.items():
@@ -474,74 +554,3 @@ class Optimizer():
         print(result.lmdif_message, '\n')
 
         return result.params
-
-    def plot(self, task_name, iterations=None):
-        try:
-            import pylab
-        except:
-            print('matplotlib not found. will not plot.')
-            return
-
-        task = self.db.session.query(Task).filter(Task.name == task_name).first()
-        if task is None:
-            print('Error: Task %s not exist' % task_name)
-            sys.exit(0)
-
-        if iterations is None:
-            iterations = (1, task.iteration)
-
-        props = dict()
-        for target in task.targets:
-            mol = target.name
-            if not mol in props.keys():
-                props[mol] = {'smiles': target.smiles,
-                              'T': [],
-                              'dens': OrderedDict([('expt', [])]),
-                              'hvap': OrderedDict([('expt', [])])
-                              }
-            props[mol]['T'].append(target.T)
-            props[mol]['dens']['expt'].append(target.density)
-            props[mol]['hvap']['expt'].append(target.hvap)
-
-            for i in iterations:
-                if i not in props[mol]['dens'].keys():
-                    props[mol]['dens'][i] = []
-                    props[mol]['hvap'][i] = []
-
-                density, hvap = target.get_npt_result(i)
-
-                props[mol]['dens'][i].append(density)
-                props[mol]['hvap'][i].append(hvap)
-
-        os.chdir(self.CWD)
-        pylab.rcParams.update({'font.size': 12})
-        for mol, prop in props.items():
-            pylab.figure(figsize=(6, 8))
-            pylab.subplot(211)
-            for i, points in prop['dens'].items():
-                if i == 'expt':
-                    marker = '--'
-                elif i == 1:
-                    marker = 'x'
-                else:
-                    marker = 'o'
-                pylab.plot(prop['T'], points, marker, label=i)
-            y_mean = np.mean(prop['dens']['expt'])
-            pylab.ylim(y_mean - 0.2, y_mean + 0.2)
-            pylab.legend()
-            pylab.title('Density %s %s (g/mL)' % (mol, prop['smiles']))
-
-            pylab.subplot(212)
-            for i, points in prop['hvap'].items():
-                if i == 'expt':
-                    marker = '--'
-                elif i == 1:
-                    marker = 'x'
-                else:
-                    marker = 'o'
-                pylab.plot(prop['T'], points, marker, label=i)
-            y_mean = np.mean(prop['hvap']['expt'])
-            pylab.ylim(y_mean - 20, y_mean + 20)
-            pylab.legend()
-            pylab.title('HVap %s %s (kJ/mol)' % (mol, prop['smiles']))
-            pylab.savefig('%s-%s.png' % (task.name, mol))

@@ -2,24 +2,23 @@ import socket
 from collections import OrderedDict
 
 class MacConfig():
-    DFF_ROOT = '/Users/zheng/Projects/DFF/Developing'
-    DFF_TABLE = 'MGI'
     PACKMOL_BIN = '/Users/zheng/Projects/DFF/Developing/bin64m/Packmol/packmol.exe'
     GMX_BIN = '/opt/gromacs/2016.3/bin/gmx'
+    DFF_ROOT = '/Users/zheng/Projects/DFF/Developing'
+    DFF_TABLE = 'MGI'
 
     MS_TOOLS_DIR = '/Users/zheng/Projects/msd-server'
-    WORK_DIR = '/tmp/MSDServer/'
 
     JOB_MANAGER = 'local'
-    NPROC_PER_JOB = 2
+    QUEUE_DICT = OrderedDict([(None, 2)])
 
 
 class ClusterConfig():
-    DFF_ROOT = '/home/gongzheng/apps/DFF/Developing'
-    DFF_TABLE = 'MGI'
     PACKMOL_BIN = '/share/apps/tools/packmol'
     GMX_BIN = '/share/apps/gromacs/2016.3/bin/gmx_gpu'
     #GMX_BIN = '/share/apps/gromacs/2016.3/bin/gmx_fast'
+    DFF_ROOT = '/home/gongzheng/apps/DFF/Developing'
+    DFF_TABLE = 'MGI'
 
     MS_TOOLS_DIR = '/home/gongzheng/GitHub/ms-tools'
 
@@ -31,13 +30,12 @@ class ClusterConfig():
 
 
 class PiConfig():
-    DFF_ROOT = '/lustre/home/nishsun/gongzheng/apps/dff'
-    DFF_TABLE = 'MGI'
     PACKMOL_BIN = '/lustre/home/nishsun/software/tools/packmol'
     GMX_BIN = '/lustre/home/nishsun/software/gromacs/5.1.4-static/bin/gmx'
+    DFF_ROOT = '/lustre/home/nishsun/gongzheng/apps/dff'
+    DFF_TABLE = 'MGI'
 
     MS_TOOLS_DIR = '/lustre/home/nishsun/gongzheng/workspace/msd-server'
-    WORK_DIR = '/lustre/home/nishsun/gongzheng/workspace/MSDServer'
 
     JOB_MANAGER = 'slurm'
     QUEUE_DICT = OrderedDict([('cpu', 8)])

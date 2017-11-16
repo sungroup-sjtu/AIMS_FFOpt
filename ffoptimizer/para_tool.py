@@ -26,6 +26,8 @@ def get_bound_for_para(key):
         bound = (3, 5)
         if key.startswith('h_'):
             bound = (2, 3)
+        if key.startswith('br') or key.startswith('i_'):
+            bound = (4, 7)
     elif key.endswith('e0'):
         bound = (0.01, 0.5)
         if key.startswith('h_'):
@@ -49,3 +51,8 @@ def get_bound_for_para(key):
     return bound
 
 
+def replace_para_name(key):
+    return key.replace('-', 'N').replace('+', 'P')
+
+def restore_para_name(key):
+    return key.replace('N', '-').replace('P', '+')
