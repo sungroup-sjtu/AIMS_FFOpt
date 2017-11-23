@@ -27,7 +27,7 @@ sys.path.append(Config.MS_TOOLS_DIR)
 from mstools.utils import cd_or_create_and_cd
 from mstools.jobmanager import Local, Torque, Slurm
 from mstools.simulation.gmx import Npt, NvtSlab, NvtGas
-from mstools.wrapper.ppf import PPF
+from mstools.wrapper.ppf import PPF, delta_ppf
 
 if Config.JOB_MANAGER == 'local':
     PBS = Local
@@ -68,13 +68,6 @@ class Task(Base):
     def dir(self):
         return os.path.join(self.cwd, self.name)
 
-    @property
-    def need_hvap_files(self):
-        for target in self.targets:
-            if target.wHvap > 0 and not target.need_vacuum:
-                return True
-        return False
-
     def npt_started(self):
         for target in self.targets:
             if target.need_npt and not target.npt_started():
@@ -110,6 +103,14 @@ class Task(Base):
             if target.need_slab and not target.slab_finished():
                 return False
         return True
+
+    def check_need_hvap_files(self):
+        for target in self.targets:
+            if target.wHvap > 0 and not target.need_vacuum:
+                self.need_hvap_files = True
+                break
+        else:
+            self.need_hvap_files = False
 
 
 class Target(Base):
@@ -180,7 +181,7 @@ class Target(Base):
     def need_slab(self) -> bool:
         return self.wST > 0
 
-    def run_npt(self, ppf_file=None, paras_diff: OrderedDict = None, drde_dict: {} = None) -> [str]:
+    def run_npt(self, ppf_file: str, paras_diff: OrderedDict, drde_dict: {}) -> [str]:
         cd_or_create_and_cd(self.dir_base_npt)
 
         if not os.path.exists('init.msd'):
@@ -194,23 +195,14 @@ class Target(Base):
         shutil.copy('../init.msd', npt.msd)
 
         ### temperature dependence
-        if paras_diff is not None:
-            paras = copy.copy(paras_diff)
-            if drde_dict is not None:
-                for k, v in drde_dict.items():
-                    if k not in paras.keys():
-                        paras[k] = v
-            for k, v in paras.items():
-                if k.endswith('dr') or k.endswith('de') or k.endswith('dl'):
-                    paras[k] = v * (self.T - 298) / 100
-                elif k.endswith('d2'):
-                    paras[k] = v * ((self.T - 298) / 100 - ((self.T - 298) / 100) ** 2 * 0.1)
-            ppf = PPF(ppf_file)
-            ppf.set_nb_paras(paras, delta=True)
-            ppf_run = 'run.ppf'
-            ppf.write(ppf_run)
-        else:
-            ppf_run = ppf_file
+        ppf_run = 'run.ppf'
+        paras = copy.copy(paras_diff)
+        for k, v in drde_dict.items():
+            if k not in paras.keys():
+                paras[k] = v
+        delta_ppf(ppf_file, ppf_run, self.T, paras)
+        ###
+
         npt.export(ppf=ppf_run, minimize=False)
 
         npt.jobmanager.refresh_preferred_queue()
@@ -239,19 +231,11 @@ class Target(Base):
                     ### temperature dependence
                     paras_delta = copy.copy(paras_diff)
                     paras_delta[key] += get_delta_for_para(key) * i
-                    if drde_dict is not None:
-                        for fuck, v in drde_dict.items():
-                            if fuck not in paras_delta.keys():
-                                paras_delta[fuck] = v
-                    for fuck, v in paras_delta.items():
-                        if fuck.endswith('dr') or fuck.endswith('de') or fuck.endswith('dl'):
-                            paras_delta[fuck] = v * (self.T - 298) / 100
-                        elif fuck.endswith('d2'):
-                            paras_delta[fuck] = v * ((self.T - 298) / 100 - ((self.T - 298) / 100) ** 2 * 0.1)
-
-                    ppf = PPF(ppf_file)
-                    ppf.set_nb_paras(paras_delta, delta=True)
-                    ppf.write(ppf_diff)
+                    for fuck, v in drde_dict.items():
+                        if fuck not in paras_delta.keys():
+                            paras_delta[fuck] = v
+                    delta_ppf(ppf_file, ppf_diff, self.T, paras_delta)
+                    ###
 
                     shutil.copy(npt.msd, msd_diff)
 
@@ -263,9 +247,7 @@ class Target(Base):
                     cmd = npt.gmx.mdrun(name=basename, nprocs=nprocs, rerun='npt.trr', get_cmd=True)
                     worker_commands.append(cmd)
 
-                    # if self.task.need_hvap_files:
-                    # TODO Temporary modification
-                    if True:
+                    if self.task.need_hvap_files:
                         npt.gmx.generate_top_for_hvap(top_diff, top_diff_hvap)
 
                         cmd = npt.gmx.grompp(mdp='diff.mdp', top=top_diff_hvap, tpr_out=basename + '-hvap.tpr',
@@ -304,7 +286,7 @@ class Target(Base):
 
         return commands
 
-    def run_vacuum(self, ppf_file=None, paras_diff: OrderedDict = None, drde_dict: {} = None) -> [str]:
+    def run_vacuum(self, ppf_file: str, paras_diff: OrderedDict, drde_dict: {}) -> [str]:
         cd_or_create_and_cd(self.dir_base_vacuum)
 
         if not os.path.exists('init.msd'):
@@ -318,27 +300,18 @@ class Target(Base):
         shutil.copy('../init.msd', vacuum.msd)
 
         ### temperature dependence
-        if paras_diff is not None:
-            paras = copy.copy(paras_diff)
-            if drde_dict is not None:
-                for k, v in drde_dict.items():
-                    if k not in paras.keys():
-                        paras[k] = v
-            for k, v in paras.items():
-                if k.endswith('dr') or k.endswith('de') or k.endswith('dl'):
-                    paras[k] = v * (self.T - 298) / 100
-                elif k.endswith('d2'):
-                    paras[k] = v * ((self.T - 298) / 100 - ((self.T - 298) / 100) ** 2 * 0.1)
-            ppf = PPF(ppf_file)
-            ppf.set_nb_paras(paras, delta=True)
-            ppf_run = 'run.ppf'
-            ppf.write(ppf_run)
-        else:
-            ppf_run = ppf_file
+        ppf_run = 'run.ppf'
+        paras = copy.copy(paras_diff)
+        for k, v in drde_dict.items():
+            if k not in paras.keys():
+                paras[k] = v
+        delta_ppf(ppf_file, ppf_run, self.T, paras)
+        ###
+
         vacuum.export(ppf=ppf_run, minimize=False)
 
         vacuum.jobmanager.refresh_preferred_queue()
-        # TODO Because of the float error in gmx edr file, MAKE SURE nst_edr equals nst_trr and nst_xtc
+        # TODO Because of the float error in gmx edr file, MAKE SURE nst_edr equals nst_trr
         commands = vacuum.prepare(T=self.T, jobname='NPT-%s-%i' % (self.name, self.T),
                                   dt=0.002, nst_eq=int(2E5), nst_run=int(5E5), nst_edr=100, nst_trr=100, nst_xtc=0)
 
@@ -362,19 +335,11 @@ class Target(Base):
                     ### temperature dependence
                     paras_delta = copy.copy(paras_diff)
                     paras_delta[key] += get_delta_for_para(key) * i
-                    if drde_dict is not None:
-                        for fuck, v in drde_dict.items():
-                            if fuck not in paras_delta.keys():
-                                paras_delta[fuck] = v
-                    for fuck, v in paras_delta.items():
-                        if fuck.endswith('dr') or fuck.endswith('de') or fuck.endswith('dl'):
-                            paras_delta[fuck] = v * (self.T - 298) / 100
-                        elif fuck.endswith('d2'):
-                            paras_delta[fuck] = v * ((self.T - 298) / 100 - ((self.T - 298) / 100) ** 2 * 0.1)
-
-                    ppf = PPF(ppf_file)
-                    ppf.set_nb_paras(paras_delta, delta=True)
-                    ppf.write(ppf_diff)
+                    for fuck, v in drde_dict.items():
+                        if fuck not in paras_delta.keys():
+                            paras_delta[fuck] = v
+                    delta_ppf(ppf_file, ppf_diff, self.T, paras_delta)
+                    ###
 
                     shutil.copy(vacuum.msd, msd_diff)
 
@@ -415,7 +380,7 @@ class Target(Base):
 
         return commands
 
-    def run_slab(self, ppf_file=None, paras_diff: OrderedDict = None, drde_dict: {} = None) -> [str]:
+    def run_slab(self, ppf_file: str, paras_diff: OrderedDict, drde_dict: {}) -> [str]:
         cd_or_create_and_cd(self.dir_base_slab)
 
         if not os.path.exists('init.msd'):
@@ -429,27 +394,17 @@ class Target(Base):
         shutil.copy('../init.msd', slab.msd)
 
         ### temperature dependence
-        if paras_diff is not None:
-            paras = copy.copy(paras_diff)
-            if drde_dict is not None:
-                for k, v in drde_dict.items():
-                    if k not in paras.keys():
-                        paras[k] = v
-            for k, v in paras.items():
-                if k.endswith('dr') or k.endswith('de') or k.endswith('dl'):
-                    paras[k] = v * (self.T - 298) / 100
-                elif k.endswith('d2'):
-                    paras[k] = v * ((self.T - 298) / 100 - ((self.T - 298) / 100) ** 2 * 0.1)
-            ppf = PPF(ppf_file)
-            ppf.set_nb_paras(paras, delta=True)
-            ppf_run = 'run.ppf'
-            ppf.write(ppf_run)
-        else:
-            ppf_run = ppf_file
+        paras = copy.copy(paras_diff)
+        for k, v in drde_dict.items():
+            if k not in paras.keys():
+                paras[k] = v
+        ppf_run = 'run.ppf'
+        delta_ppf(ppf_file, ppf_run, self.T, paras)
+        ###
+
         slab.export(ppf=ppf_run, minimize=False)
 
         jobmanager.refresh_preferred_queue()
-        # TODO Because of the float error in gmx edr file, MAKE SURE nst_edr equals nst_trr
         commands = slab.prepare(T=self.T, TANNEAL=500, jobname='SLAB-%s-%i' % (self.name, self.T),
                                 dt=0.002, nst_eq=int(3E5), nst_run=int(2.5E6), nst_edr=200, nst_trr=000, nst_xtc=10000)
 

@@ -98,23 +98,31 @@ class Optimizer():
             cycle = 1
 
         for target in task.targets:
+            del_files = []
             try:
                 files = os.listdir(target.dir_base_npt)
-                for fname in files:
-                    fpath = os.path.join(target.dir_base_npt, fname)
-                    if os.path.isdir(fpath):
-                        dircycle = int(fname.split('-')[-1])
-                        if dircycle > cycle:
-                            shutil.rmtree(fpath)
+                del_files += list(map(lambda x: os.path.join(target.dir_base_npt, x), files))
+            except:
+                pass
+            try:
+                files = os.listdir(target.dir_base_vacuum)
+                del_files += list(map(lambda x: os.path.join(target.dir_base_vacuum, x), files))
+            except:
+                pass
+            try:
                 files = os.listdir(target.dir_base_slab)
-                for fname in files:
-                    fpath = os.path.join(target.dir_base_slab, fname)
-                    if os.path.isdir(fpath):
-                        dircycle = int(fname.split('-')[-1])
-                        if dircycle > cycle:
+                del_files += list(map(lambda x: os.path.join(target.dir_base_slab, x), files))
+            except:
+                pass
+
+            for fpath in del_files:
+                if os.path.isdir(fpath):
+                    dircycle = int(fpath.split('-')[-1])
+                    if dircycle > cycle:
+                        try:
                             shutil.rmtree(fpath)
-            except Exception as e:
-                print(str(e))
+                        except Exception as e:
+                            print(str(e))
 
         task.results.delete()
         task.iteration = 0
@@ -148,6 +156,8 @@ class Optimizer():
         if task.iteration != 0:
             print('Error: This task has been optimized before')
             sys.exit(0)
+
+        task.check_need_hvap_files()
 
         if max_iter != None:
             self.max_iter = max_iter

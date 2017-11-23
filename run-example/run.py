@@ -54,18 +54,14 @@ if __name__ == '__main__':
         optimizer.drde_dict = {
             'h_1_dr': -0.01,
             'h_1_de': 0.045,
-            'c_4_dr': -0.002,
-            'c_4_de': 0.02,
-            'o_2_dr': -0.002,
-            'o_2_de': 0.02,
-            'c_3_de': 0.005,
+            'c_4_dl': 0.020,
+            'o_2_d2': 0.027,
         }
 
         optimizer.optimize(task_name=sys.argv[2],
                            torsions=torsions,
                            modify_torsions=modify_torsions,
                            #weight_expansivity=0.01,
-                           #weight_expan_hvap=0.1,
                            penalty_sigma=2,
                            penalty_epsilon=0.4,
                            penalty_charge=0,
@@ -73,12 +69,6 @@ if __name__ == '__main__':
                                # 'all_dr': -0.01,
                                # 'all_de': 0.056
                            })
-
-    elif cmd == 'plot':
-        iterations = None
-        if len(sys.argv) > 3:
-            iterations = tuple(map(int, sys.argv[3:]))
-        optimizer.plot(sys.argv[2], iterations)
 
     else:
         print('Unknown command')
