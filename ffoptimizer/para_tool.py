@@ -23,7 +23,7 @@ def get_delta_for_para(key):
 
 def get_bound_for_para(key):
     if key.endswith('r0'):
-        bound = (3, 5)
+        bound = (2.5, 5)
         if key.startswith('h_'):
             bound = (2, 3)
         if key.startswith('br') or key.startswith('i_'):

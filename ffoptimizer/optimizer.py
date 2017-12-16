@@ -56,19 +56,13 @@ class Optimizer():
             target.hvap = float(words[6])
             target.wHvap = float(words[7])
 
-            if len(words) > 8:
-                target.st = float(words[8])
-                target.wST = float(words[9])
-            else:
-                target.st = 0
-                target.wST = 0
-
-            if target.density == 0:
-                target.wDens = 0
-            if target.hvap == 0:
-                target.wHvap = 0
-            if target.st == 0:
-                target.wST = 0
+            # TODO Disable surface tension
+            # if len(words) > 8:
+            #     target.st = float(words[8])
+            #     target.wST = float(words[9])
+            # else:
+            #     target.st = 0
+            #     target.wST = 0
 
             target.calc_n_mol()
             self.db.session.add(target)
@@ -541,10 +535,12 @@ class Optimizer():
             return J
 
         def callback(params: Parameters, iter: int, res: [float]):
+            print(task.iteration, self.max_iter)
+            if task.iteration >= self.max_iter:
+                print('Max iter reached. Abort the optimization')
+                sys.exit()
             print('Wait for 3 seconds ...')
             time.sleep(3)
-            if self.max_iter != None and task.iteration >= self.max_iter:
-                return True  # abort optimization
 
         ppf = PPF(string=task.ppf)
         adj_nb_paras = ppf.get_adj_nb_paras()

@@ -126,8 +126,8 @@ class Target(Base):
     wDens = NotNullColumn(Float)
     hvap = NotNullColumn(Float)
     wHvap = NotNullColumn(Float)
-    st = NotNullColumn(Float)
-    wST = NotNullColumn(Float)
+    st = NotNullColumn(Float, default=0)
+    wST = NotNullColumn(Float, default=0)
 
     task = relationship(Task)
 
@@ -473,10 +473,16 @@ class Target(Base):
         os.chdir(self.dir_npt)
 
         # energy and Hvap after diff
-        df = panedr.edr_to_df('diff1.%s.edr' % k)
+        try:
+            df = panedr.edr_to_df('diff1.%s.edr' % k)
+        except:
+            raise Exception('File not exist: ' + os.path.abspath('diff1.%s.edr' % k))
         pene_array_diff_p = np.array(df.Potential)
 
-        df = panedr.edr_to_df('diff-1.%s.edr' % k)
+        try:
+            df = panedr.edr_to_df('diff-1.%s.edr' % k)
+        except:
+            raise Exception('File not exist: ' + os.path.abspath('diff-1.%s.edr' % k))
         pene_array_diff_n = np.array(df.Potential)
 
         # calculate the derivative series dA/dp
@@ -514,10 +520,16 @@ class Target(Base):
         os.chdir(self.dir_npt)
 
         # energy and Hvap after diff
-        df = panedr.edr_to_df('diff1.%s.edr' % k)
+        try:
+            df = panedr.edr_to_df('diff1.%s.edr' % k)
+        except:
+            raise Exception('File not exist: ' + os.path.abspath('diff1.%s.edr' % k))
         pene_array_diff_p = np.array(df.Potential)
 
-        df = panedr.edr_to_df('diff-1.%s.edr' % k)
+        try:
+            df = panedr.edr_to_df('diff-1.%s.edr' % k)
+        except:
+            raise Exception('File not exist: ' + os.path.abspath('diff-1.%s.edr' % k))
         pene_array_diff_n = np.array(df.Potential)
 
         # calculate the derivative series dA/dp
@@ -525,10 +537,16 @@ class Target(Base):
         dPene_array = (pene_array_diff_p - pene_array_diff_n) / delta / 2
 
         if not self.need_vacuum:
-            df = panedr.edr_to_df('diff1.%s-hvap.edr' % k)
+            try:
+                df = panedr.edr_to_df('diff1.%s-hvap.edr' % k)
+            except:
+                raise Exception('File not exist: ' + os.path.abspath('diff1.%s-hvap.edr' % k))
             hvap_array_diff_p = self.RT - np.array(df.Potential) / self.n_mol
 
-            df = panedr.edr_to_df('diff-1.%s-hvap.edr' % k)
+            try:
+                df = panedr.edr_to_df('diff-1.%s-hvap.edr' % k)
+            except:
+                raise Exception('File not exist: ' + os.path.abspath('diff-1.%s-hvap.edr' % k))
             hvap_array_diff_n = self.RT - np.array(df.Potential) / self.n_mol
 
             dHvap_array = (hvap_array_diff_p - hvap_array_diff_n) / delta / 2
@@ -541,10 +559,16 @@ class Target(Base):
 
             os.chdir(self.dir_vacuum)
 
-            df = panedr.edr_to_df('diff1.%s.edr' % k)
+            try:
+                df = panedr.edr_to_df('diff1.%s.edr' % k)
+            except:
+                raise Exception('File not exist: ' + os.path.abspath('diff1.%s.edr' % k))
             pene_array_diff_p = np.array(df.Potential)
 
-            df = panedr.edr_to_df('diff-1.%s.edr' % k)
+            try:
+                df = panedr.edr_to_df('diff-1.%s.edr' % k)
+            except:
+                raise Exception('File not exist: ' + os.path.abspath('diff-1.%s.edr' % k))
             pene_array_diff_n = np.array(df.Potential)
             dPene_array = (pene_array_diff_p - pene_array_diff_n) / delta / 2
 
