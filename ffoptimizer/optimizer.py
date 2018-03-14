@@ -56,13 +56,11 @@ class Optimizer():
             target.hvap = float(words[6])
             target.wHvap = float(words[7])
 
-            # TODO Disable surface tension
-            # if len(words) > 8:
-            #     target.st = float(words[8])
-            #     target.wST = float(words[9])
-            # else:
-            #     target.st = 0
-            #     target.wST = 0
+            # TODO dielectric
+            try:
+                target.dielectric = float(words[8])
+            except:
+                pass
 
             target.calc_n_mol()
             self.db.session.add(target)
@@ -101,11 +99,6 @@ class Optimizer():
             try:
                 files = os.listdir(target.dir_base_vacuum)
                 del_files += list(map(lambda x: os.path.join(target.dir_base_vacuum, x), files))
-            except:
-                pass
-            try:
-                files = os.listdir(target.dir_base_slab)
-                del_files += list(map(lambda x: os.path.join(target.dir_base_slab, x), files))
             except:
                 pass
 
@@ -265,33 +258,8 @@ class Optimizer():
                                                name='%s-%i-VAC%i' % (task.name, task.iteration, i), sh=sh)
                         jobmanager.submit(sh)
 
-            if not task.slab_started():
-                gtx_dirs = []
-                gtx_cmds = []
-                for target in task.targets:
-                    if not target.need_slab:
-                        continue
-                    if target.slab_started():
-                        continue
-                    cmds = target.run_slab(ppf_out, paras, drde_dict=self.drde_dict)
-                    ### save gtx_dirs and gtx_cmds for running jobs on gtx queue
-                    if cmds != []:
-                        gtx_dirs.append(target.dir_slab)
-                        gtx_cmds = cmds
-
-                os.chdir(self.CWD)
-
-                if gtx_dirs != []:
-                    from .models import slab, jobmanager
-                    commands_list = slab.gmx.generate_gpu_multidir_cmds(gtx_dirs, gtx_cmds, n_parallel=self.n_parallel)
-                    for i, commands in enumerate(commands_list):
-                        sh = os.path.join(task.dir, '_job.slab-%i.sh' % i)
-                        jobmanager.generate_sh(task.dir, commands,
-                                               name='%s-%i-SLA%i' % (task.name, task.iteration, i), sh=sh)
-                        jobmanager.submit(sh)
-
             while True:
-                if task.npt_finished() and task.vacuum_finished() and task.slab_finished():
+                if task.npt_finished() and task.vacuum_finished():
                     break
                 else:
                     current_time = time.strftime('%m-%d %H:%M')
@@ -303,7 +271,6 @@ class Optimizer():
             ST = []
             R_dens = []
             R_hvap = []
-            R_st = []
             targets = task.targets.all()
             for target in targets:
                 if target.wDens > 1E-4:
@@ -314,11 +281,7 @@ class Optimizer():
                     hvap = target.get_hvap()
                     R_hvap.append((hvap - target.hvap) / target.hvap * 100 * target.wHvap)  # deviation percent
                     Hvap.append(hvap)
-                if target.wST > 1E-4:
-                    st = target.get_slab_result()
-                    R_st.append((st - target.st) / target.st * 100 * target.wST)  # deviation percent
-                    ST.append(st)
-            R = R_dens + R_hvap + R_st
+            R = R_dens + R_hvap
             os.chdir(self.CWD)
 
             ### expansivity
@@ -384,15 +347,6 @@ class Optimizer():
                     r, prop, r / weight, target.hvap, Hvap[i], weight, target.T, target.P, target.name,
                     target.smiles)
 
-            targets_st = task.targets.filter(Target.wST > 1E-4).all()
-            for i, r in enumerate(R_st):
-                target = targets_st[i]
-                prop = 'st'
-                weight = target.wST
-                txt += '%8.2f %8s %8.2f %% %8.1f %8.1f %8.2f %3i %3i %s %s\n' % (
-                    r, prop, r / weight, target.st, ST[i], weight, target.T, target.P, target.name,
-                    target.smiles)
-
             if weight_expansivity != 0:
                 for i, r in enumerate(R_expa):
                     target = targets[i * 2]
@@ -432,7 +386,6 @@ class Optimizer():
 
             J_dens = []
             J_hvap = []
-            J_st = []
             targets = task.targets.all()
             for target in targets:
                 if target.wDens > 1E-4:
@@ -441,10 +394,7 @@ class Optimizer():
                 if target.wHvap > 1E-4:
                     dHdp_list = target.get_dHvap_list_from_paras(paras)
                     J_hvap.append([i / target.hvap * 100 * target.wHvap for i in dHdp_list])  # deviation  percent
-                if target.wST > 1E-4:
-                    dSTdp_list = target.get_dST_list_from_paras(paras)
-                    J_st.append([i / target.st * 100 * target.wST for i in dSTdp_list])  # deviation  percent
-            J = J_dens + J_hvap + J_st
+            J = J_dens + J_hvap
             os.chdir(self.CWD)
 
             ### expansivity
@@ -500,14 +450,6 @@ class Optimizer():
             for i, row in enumerate(J_hvap):
                 name = targets_hvap[i].name
                 prop = 'hvap'
-                for item in row:
-                    txt += '%10.2f' % item
-                txt += ' %8s %s\n' % (prop, name)
-
-            targets_st = task.targets.filter(Target.wST > 1E-4).all()
-            for i, row in enumerate(J_st):
-                name = targets_st[i].name
-                prop = 'st'
                 for item in row:
                     txt += '%10.2f' % item
                 txt += ' %8s %s\n' % (prop, name)

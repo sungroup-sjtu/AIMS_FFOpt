@@ -44,7 +44,6 @@ kwargs = {'packmol_bin': Config.PACKMOL_BIN, 'dff_root': Config.DFF_ROOT, 'dff_t
           'gmx_bin': Config.GMX_BIN, 'jobmanager': jobmanager}
 npt = Npt(**kwargs)
 vacuum = NvtGas(**kwargs)
-slab = NvtSlab(**kwargs)
 
 
 def wrapper_target(target_funcname_args):
@@ -92,18 +91,6 @@ class Task(Base):
                 return False
         return True
 
-    def slab_started(self):
-        for target in self.targets:
-            if target.need_slab and not target.slab_started():
-                return False
-        return True
-
-    def slab_finished(self):
-        for target in self.targets:
-            if target.need_slab and not target.slab_finished():
-                return False
-        return True
-
     def check_need_hvap_files(self):
         for target in self.targets:
             if target.wHvap > 0 and not target.need_vacuum:
@@ -126,8 +113,8 @@ class Target(Base):
     wDens = NotNullColumn(Float)
     hvap = NotNullColumn(Float)
     wHvap = NotNullColumn(Float)
-    st = NotNullColumn(Float, default=0)
-    wST = NotNullColumn(Float, default=0)
+    # TODO dielectric
+    dielectric = NotNullColumn('st', Float, default=1)
 
     task = relationship(Task)
 
@@ -150,20 +137,12 @@ class Target(Base):
         return os.path.join(self.task.dir, 'NPT-%s' % (self.name))
 
     @property
-    def dir_base_slab(self):
-        return os.path.join(self.task.dir, 'SLAB-%s' % (self.name))
-
-    @property
     def dir_base_vacuum(self):
         return os.path.join(self.task.dir, 'VACUUM-%s' % (self.name))
 
     @property
     def dir_npt(self):
         return os.path.join(self.dir_base_npt, '%i-%i-%i' % (self.T, self.P, self.task.iteration))
-
-    @property
-    def dir_slab(self):
-        return os.path.join(self.dir_base_slab, '%i-%i-%i' % (self.T, self.P, self.task.iteration))
 
     @property
     def dir_vacuum(self):
@@ -176,10 +155,6 @@ class Target(Base):
     @property
     def need_vacuum(self) -> bool:
         return self.wHvap > 0 and self.smiles.find('.') > -1
-
-    @property
-    def need_slab(self) -> bool:
-        return self.wST > 0
 
     def run_npt(self, ppf_file: str, paras_diff: OrderedDict, drde_dict: {}) -> [str]:
         cd_or_create_and_cd(self.dir_base_npt)
@@ -206,6 +181,9 @@ class Target(Base):
         npt.export(ppf=ppf_run, minimize=False)
 
         npt.jobmanager.refresh_preferred_queue()
+        # TODO dielectric
+        npt.gmx._DIELECTRIC = self.dielectric or 1
+
         # TODO Because of the float error in gmx edr file, MAKE SURE nst_edr equals nst_trr and nst_xtc
         commands = npt.prepare(T=self.T, P=self.P, jobname='NPT-%s-%i' % (self.name, self.T),
                                dt=0.002, nst_eq=int(3E5), nst_run=int(2E5), nst_edr=200, nst_trr=200, nst_xtc=200)
@@ -311,6 +289,8 @@ class Target(Base):
         vacuum.export(ppf=ppf_run, minimize=False)
 
         vacuum.jobmanager.refresh_preferred_queue()
+        # TODO dielectric
+        vacuum.gmx._DIELECTRIC = self.dielectric or 1
         # TODO Because of the float error in gmx edr file, MAKE SURE nst_edr equals nst_trr
         commands = vacuum.prepare(T=self.T, jobname='NPT-%s-%i' % (self.name, self.T),
                                   dt=0.002, nst_eq=int(2E5), nst_run=int(5E5), nst_edr=100, nst_trr=100, nst_xtc=0)
@@ -380,44 +360,6 @@ class Target(Base):
 
         return commands
 
-    def run_slab(self, ppf_file: str, paras_diff: OrderedDict, drde_dict: {}) -> [str]:
-        cd_or_create_and_cd(self.dir_base_slab)
-
-        if not os.path.exists('init.msd'):
-            smiles_list = self.smiles.split('.')
-            density = self.density if self.density > 0 else None
-            slab.set_system(smiles_list, n_atoms=5000, n_mol_ratio=[1] * len(smiles_list), density=density)
-            slab.build(export=False)
-
-        cd_or_create_and_cd(self.dir_slab)
-
-        shutil.copy('../init.msd', slab.msd)
-
-        ### temperature dependence
-        paras = copy.copy(paras_diff)
-        for k, v in drde_dict.items():
-            if k not in paras.keys():
-                paras[k] = v
-        ppf_run = 'run.ppf'
-        delta_ppf(ppf_file, ppf_run, self.T, paras)
-        ###
-
-        slab.export(ppf=ppf_run, minimize=False)
-
-        jobmanager.refresh_preferred_queue()
-        commands = slab.prepare(T=self.T, TANNEAL=500, jobname='SLAB-%s-%i' % (self.name, self.T),
-                                dt=0.002, nst_eq=int(3E5), nst_run=int(2.5E6), nst_edr=200, nst_trr=000, nst_xtc=10000)
-
-        commands.insert(0, 'touch _started_')
-        commands.append('touch _finished_')
-        jobmanager.generate_sh(os.getcwd(), commands, name='SLAB-%s-%i-%i' % (self.name, self.T, self.task.iteration))
-
-        if jobmanager.queue != 'gtx':
-            slab.run()
-            commands = []
-
-        return commands
-
     def get_density(self) -> float:
         os.chdir(self.dir_npt)
         print(os.getcwd())
@@ -446,13 +388,6 @@ class Target(Base):
             hvap = self.RT + pe_gas - pe_liq / self.n_mol
 
         return hvap
-
-    def get_st(self) -> float:
-        os.chdir(self.dir_slab)
-        print(os.getcwd())
-
-        st = slab.gmx.get_property('nvt.edr', '#Surf', begin=1000) / 20
-        return st
 
     def get_dDens_list_from_paras(self, paras: OrderedDict):
         os.chdir(self.dir_npt)
@@ -579,33 +514,6 @@ class Target(Base):
 
         return dHdp
 
-    def get_dST_list_from_paras(self, paras: OrderedDict):
-        os.chdir(self.dir_slab)
-
-        ### TODO Only gives a rough estimate
-        with open('topol.top') as f:
-            self.top_content = f.read()
-        py_mol = pybel.readstring('smi', self.smiles)
-        py_mol.addh()
-        self.n_atoms = py_mol.atoms.__len__()
-        ###
-
-        # dSTdp_list = [self.get_dST_from_para(k) for k in paras.keys()]
-        from multiprocessing import Pool
-        with Pool(len(paras)) as p:
-            dSTdp_list = p.map(wrapper_target, [(self, 'get_dST_from_para', k) for k in paras.keys()])
-
-        return dSTdp_list
-
-    def get_dST_from_para(self, k) -> float:
-        os.chdir(self.dir_slab)
-
-        ### TODO Only gives a rough estimate
-        if not k.endswith('e0'):
-            return 0
-        return self.top_content.count(k[:-3]) / self.n_atoms * 10000
-        ###
-
     def npt_started(self) -> bool:
         log_started = os.path.join(self.dir_npt, '_started_')
         if os.path.exists(log_started):
@@ -633,21 +541,6 @@ class Target(Base):
             return True
 
         return False
-
-    def slab_started(self) -> bool:
-        log_started = os.path.join(self.dir_slab, '_started_')
-        if os.path.exists(log_started):
-            return True
-
-        return False
-
-    def slab_finished(self) -> bool:
-        log_finished = os.path.join(self.dir_slab, '_finished_')
-        if os.path.exists(log_finished):
-            return True
-
-        return False
-
 
 class Result(Base):
     __tablename__ = 'result'
