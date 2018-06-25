@@ -268,7 +268,6 @@ class Optimizer():
 
             Dens = []
             Hvap = []
-            ST = []
             R_dens = []
             R_hvap = []
             targets = task.targets.all()

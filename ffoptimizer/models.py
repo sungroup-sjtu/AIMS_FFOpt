@@ -26,7 +26,7 @@ sys.path.append(Config.MS_TOOLS_DIR)
 
 from mstools.utils import cd_or_create_and_cd
 from mstools.jobmanager import Local, Torque, Slurm
-from mstools.simulation.gmx import Npt, NvtSlab, NvtGas
+from mstools.simulation.gmx import Npt, NvtGas
 from mstools.wrapper.ppf import PPF, delta_ppf
 
 if Config.JOB_MANAGER == 'local':
@@ -38,10 +38,15 @@ elif Config.JOB_MANAGER == 'slurm':
 else:
     raise Exception('Job manager not supported')
 
-jobmanager = PBS(queue_dict=Config.QUEUE_DICT)
+jobmanager = PBS(queue_list=Config.PBS_QUEUE_LIST, env_cmd=Config.PBS_ENV_CMD)
+jobmanager.time = 1
 
-kwargs = {'packmol_bin': Config.PACKMOL_BIN, 'dff_root': Config.DFF_ROOT, 'dff_table': Config.DFF_TABLE,
-          'gmx_bin': Config.GMX_BIN, 'jobmanager': jobmanager}
+kwargs = {'packmol_bin': Config.PACKMOL_BIN,
+          'dff_root'   : Config.DFF_ROOT,
+          'dff_table'  : Config.DFF_TABLE,
+          'gmx_bin'    : Config.GMX_BIN,
+          'gmx_mdrun'  : Config.GMX_MDRUN,
+          'jobmanager' : jobmanager}
 npt = Npt(**kwargs)
 vacuum = NvtGas(**kwargs)
 
@@ -231,7 +236,7 @@ class Target(Base):
                         cmd = npt.gmx.grompp(mdp='diff.mdp', top=top_diff_hvap, tpr_out=basename + '-hvap.tpr',
                                              get_cmd=True)
                         worker_commands.append(cmd)
-                        cmd = npt.gmx.mdrun(name=basename + '-hvap', nprocs=nprocs, n_thread=nprocs, rerun='npt.trr',
+                        cmd = npt.gmx.mdrun(name=basename + '-hvap', nprocs=nprocs, n_omp=nprocs, rerun='npt.trr',
                                             get_cmd=True)
                         worker_commands.append(cmd)
 
@@ -258,7 +263,7 @@ class Target(Base):
         commands.append('touch _finished_')
         jobmanager.generate_sh(os.getcwd(), commands, name='NPT-%s-%i-%i' % (self.name, self.T, self.task.iteration))
 
-        if jobmanager.queue != 'gtx':
+        if jobmanager.ngpu == 0:
             npt.run()
             commands = []
 
@@ -328,7 +333,7 @@ class Target(Base):
 
                     cmd = vacuum.gmx.grompp(mdp='diff.mdp', top=top_diff, tpr_out=basename + '.tpr', get_cmd=True)
                     worker_commands.append(cmd)
-                    cmd = vacuum.gmx.mdrun(name=basename, nprocs=nprocs, n_thread=nprocs, rerun='nvt.trr', get_cmd=True)
+                    cmd = vacuum.gmx.mdrun(name=basename, nprocs=nprocs, n_omp=nprocs, rerun='nvt.trr', get_cmd=True)
                     worker_commands.append(cmd)
 
                     os.remove(ppf_diff)
@@ -354,7 +359,7 @@ class Target(Base):
         commands.append('touch _finished_')
         jobmanager.generate_sh(os.getcwd(), commands, name='VACUUM-%s-%i-%i' % (self.name, self.T, self.task.iteration))
 
-        if jobmanager.queue != 'gtx':
+        if jobmanager.ngpu == 0:
             vacuum.run()
             commands = []
 
@@ -487,10 +492,10 @@ class Target(Base):
             dHvap_array = (hvap_array_diff_p - hvap_array_diff_n) / delta / 2
 
             dHdp = dHvap_array.mean() - 1 / self.RT * (
-                (self.hvap_array * dPene_array).mean() - self.hvap_array.mean() * dPene_array.mean())
+                    (self.hvap_array * dPene_array).mean() - self.hvap_array.mean() * dPene_array.mean())
         else:
             dELIQdp = dPene_array.mean() - 1 / self.RT * (
-                (self.pe_liq_array * dPene_array).mean() - self.pe_liq_array.mean() * dPene_array.mean())
+                    (self.pe_liq_array * dPene_array).mean() - self.pe_liq_array.mean() * dPene_array.mean())
 
             os.chdir(self.dir_vacuum)
 
@@ -508,7 +513,7 @@ class Target(Base):
             dPene_array = (pene_array_diff_p - pene_array_diff_n) / delta / 2
 
             dEGASdp = dPene_array.mean() - 1 / self.RT * (
-                (self.pe_gas_array * dPene_array).mean() - self.pe_gas_array.mean() * dPene_array.mean())
+                    (self.pe_gas_array * dPene_array).mean() - self.pe_gas_array.mean() * dPene_array.mean())
 
             dHdp = dEGASdp - dELIQdp / self.n_mol
 
@@ -541,6 +546,7 @@ class Target(Base):
             return True
 
         return False
+
 
 class Result(Base):
     __tablename__ = 'result'
