@@ -8,7 +8,6 @@ from collections import OrderedDict
 
 import numpy as np
 from lmfit import Parameters, Minimizer
-from sqlalchemy import and_
 
 from .db import DB
 from .models import Task, Target, Result, PPF
@@ -167,11 +166,8 @@ class Optimizer():
 
         def residual(params: Parameters):
             ### if result exist in database, ignore calculation
-            result = self.db.session.query(Result).filter(
-                and_(
-                    Result.task == task,
-                    Result.parameter == str(params)
-                )).first()
+            result = self.db.session.query(Result).filter(Result.task == task) \
+                .filter(Result.parameter == str(params)).first()
             if result is not None:
                 R = result.residual
                 if R is not None:
@@ -225,7 +221,10 @@ class Optimizer():
 
                 if gtx_dirs != []:
                     from .models import npt, jobmanager
-                    commands_list = npt.gmx.generate_gpu_multidir_cmds(gtx_dirs, gtx_cmds, n_parallel=self.n_parallel)
+                    commands_list = npt.gmx.generate_gpu_multidir_cmds(gtx_dirs, gtx_cmds,
+                                                                       n_parallel=self.n_parallel,
+                                                                       n_gpu=jobmanager.ngpu,
+                                                                       n_procs=jobmanager.nprocs)
                     for i, commands in enumerate(commands_list):
                         sh = os.path.join(task.dir, '_job.npt-%i.sh' % i)
                         jobmanager.generate_sh(task.dir, commands,
@@ -251,7 +250,9 @@ class Optimizer():
                 if gtx_dirs != []:
                     from .models import vacuum, jobmanager
                     commands_list = vacuum.gmx.generate_gpu_multidir_cmds(gtx_dirs, gtx_cmds,
-                                                                          n_parallel=self.n_parallel)
+                                                                          n_parallel=self.n_parallel,
+                                                                          n_gpu=jobmanager.ngpu,
+                                                                          n_procs=jobmanager.nprocs)
                     for i, commands in enumerate(commands_list):
                         sh = os.path.join(task.dir, '_job.vacuum-%i.sh' % i)
                         jobmanager.generate_sh(task.dir, commands,
@@ -368,11 +369,8 @@ class Optimizer():
 
         def jacobian(params: Parameters):
             ### if result exist in database, ignore calculation
-            result = self.db.session.query(Result).filter(
-                and_(
-                    Result.task == task,
-                    Result.parameter == str(params)
-                )).first()
+            result = self.db.session.query(Result).filter(Result.task == task) \
+                .filter(Result.parameter == str(params)).first()
             if result is not None:
                 J = result.jacobian
                 if J is not None:
@@ -421,11 +419,8 @@ class Optimizer():
             J += J_pena
 
             ### save result to database
-            result = self.db.session.query(Result).filter(
-                and_(
-                    Result.task == task,
-                    Result.iteration == task.iteration
-                )).first()
+            result = self.db.session.query(Result).filter(Result.task == task) \
+                .filter(Result.iteration == task.iteration).first()
 
             result.jacobian = json.dumps(J)
             self.db.session.commit()

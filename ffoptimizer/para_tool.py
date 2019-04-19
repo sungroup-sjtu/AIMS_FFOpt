@@ -25,11 +25,11 @@ def get_bound_for_para(key):
     if key.endswith('r0'):
         bound = (2.5, 6)
         if key.startswith('h_'):
-            bound = (2, 3)
+            bound = (1, 4)
     elif key.endswith('e0'):
         bound = (0.01, 0.5)
         if key.startswith('h_'):
-            bound = (0.01, 0.05)
+            bound = (0.001, 0.05)
     elif key.endswith('bi'):
         bound = (-0.6, 0.6)
 

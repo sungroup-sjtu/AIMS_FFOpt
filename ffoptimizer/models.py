@@ -29,16 +29,14 @@ from mstools.jobmanager import Local, Torque, Slurm
 from mstools.simulation.gmx import Npt, NvtGas
 from mstools.wrapper.ppf import PPF, delta_ppf
 
-if Config.JOB_MANAGER == 'local':
-    PBS = Local
+if Config.JOB_MANAGER == 'slurm':
+    PBS = Slurm
 elif Config.JOB_MANAGER == 'torque':
     PBS = Torque
-elif Config.JOB_MANAGER == 'slurm':
-    PBS = Slurm
 else:
     raise Exception('Job manager not supported')
 
-jobmanager = PBS(queue_list=Config.PBS_QUEUE_LIST, env_cmd=Config.PBS_ENV_CMD)
+jobmanager = PBS(*Config.PBS_QUEUE, env_cmd=Config.PBS_ENV_CMD)
 jobmanager.time = 1
 
 kwargs = {'packmol_bin': Config.PACKMOL_BIN,
@@ -183,15 +181,15 @@ class Target(Base):
         delta_ppf(ppf_file, ppf_run, self.T, paras)
         ###
 
-        npt.export(ppf=ppf_run, minimize=False)
+        npt.export(ppf=ppf_run)
 
-        npt.jobmanager.refresh_preferred_queue()
         # TODO dielectric
         npt.gmx._DIELECTRIC = self.dielectric or 1
 
         # TODO Because of the float error in gmx edr file, MAKE SURE nst_edr equals nst_trr and nst_xtc
         commands = npt.prepare(T=self.T, P=self.P, jobname='NPT-%s-%i' % (self.name, self.T),
                                dt=0.002, nst_eq=int(3E5), nst_run=int(2E5), nst_edr=200, nst_trr=200, nst_xtc=200)
+                               # dt=0.001, nst_eq=int(5E5), nst_run=int(5E5), nst_edr=500, nst_trr=500, nst_xtc=500)
 
         commands.insert(0, 'touch _started_')
 
@@ -291,14 +289,14 @@ class Target(Base):
         delta_ppf(ppf_file, ppf_run, self.T, paras)
         ###
 
-        vacuum.export(ppf=ppf_run, minimize=False)
+        vacuum.export(ppf=ppf_run)
 
-        vacuum.jobmanager.refresh_preferred_queue()
         # TODO dielectric
         vacuum.gmx._DIELECTRIC = self.dielectric or 1
         # TODO Because of the float error in gmx edr file, MAKE SURE nst_edr equals nst_trr
         commands = vacuum.prepare(T=self.T, jobname='NPT-%s-%i' % (self.name, self.T),
                                   dt=0.002, nst_eq=int(2E5), nst_run=int(5E5), nst_edr=100, nst_trr=100, nst_xtc=0)
+                                  # dt=0.001, nst_eq=int(4E5), nst_run=int(10E5), nst_edr=500, nst_trr=500, nst_xtc=0)
 
         commands.insert(0, 'touch _started_')
 
