@@ -37,7 +37,7 @@ else:
     raise Exception('Job manager not supported')
 
 jobmanager = PBS(*Config.PBS_QUEUE, env_cmd=Config.PBS_ENV_CMD)
-jobmanager.time = 1
+jobmanager.time = 2
 
 kwargs = {'packmol_bin': Config.PACKMOL_BIN,
           'dff_root'   : Config.DFF_ROOT,
@@ -46,7 +46,11 @@ kwargs = {'packmol_bin': Config.PACKMOL_BIN,
           'gmx_mdrun'  : Config.GMX_MDRUN,
           'jobmanager' : jobmanager}
 npt = Npt(**kwargs)
-vacuum = NvtGas(**kwargs)
+gas = NvtGas(**kwargs)
+
+# TODO LJ96 potential
+npt.gmx._LJ96 = Config.LJ96
+gas.gmx._LJ96 = Config.LJ96
 
 
 def wrapper_target(target_funcname_args):
@@ -188,20 +192,32 @@ class Target(Base):
 
         # TODO Because of the float error in gmx edr file, MAKE SURE nst_edr equals nst_trr and nst_xtc
         commands = npt.prepare(T=self.T, P=self.P, jobname='NPT-%s-%i' % (self.name, self.T),
-                               dt=0.002, nst_eq=int(3E5), nst_run=int(2E5), nst_edr=200, nst_trr=200, nst_xtc=200)
+                               dt=0.002, nst_eq=int(2E5), nst_run=int(2E5), nst_edr=200, nst_trr=200, nst_xtc=200)
                                # dt=0.001, nst_eq=int(5E5), nst_run=int(5E5), nst_edr=500, nst_trr=500, nst_xtc=500)
 
         commands.insert(0, 'touch _started_')
+
+        # TODO LJ96 potential
+        if Config.LJ96:
+            npt.gmx.modify_lj96(['topol.itp'],
+                                ['topol.top', 'topol-hvap.top'],
+                                ['grompp-em.mdp', 'grompp-anneal.mdp', 'grompp-eq.mdp', 'grompp-npt.mdp',
+                                 'grompp-hvap.mdp'],
+                                ['em.xvg', 'anneal.xvg', 'eq.xvg', 'npt.xvg', 'hvap.xvg'])
 
         if paras_diff is not None:
             npt.gmx.prepare_mdp_from_template('t_npt.mdp', mdp_out='diff.mdp', nstxtcout=0, restart=True)
             commands.append('export GMX_MAXCONSTRWARN=-1')
             nprocs = npt.jobmanager.nprocs
 
+            # TODO LJ96 potential
+            if Config.LJ96:
+                npt.gmx.modify_lj96([], [], ['diff.mdp'], [])
+
             import multiprocessing
             def worker(key, return_dict):
                 worker_commands = []
-                for i in [-1, 1]:
+                for i in [1]:
                     basename = 'diff%i.%s' % (i, key)
                     ppf_diff = basename + '.ppf'
                     msd_diff = basename + '.msd'
@@ -223,6 +239,10 @@ class Target(Base):
                     npt.dff.set_charge([msd_diff], ppf_diff, dfi_name=basename)
                     npt.dff.export_gmx(msd_diff, ppf_diff, gro_out=gro_diff, top_out=top_diff, dfi_name=basename)
 
+                    # TODO LJ96 potential
+                    if Config.LJ96:
+                        npt.gmx.modify_lj96([basename + '.itp'], [top_diff], [], [basename + '.xvg'])
+
                     cmd = npt.gmx.grompp(mdp='diff.mdp', top=top_diff, tpr_out=basename + '.tpr', get_cmd=True)
                     worker_commands.append(cmd)
                     cmd = npt.gmx.mdrun(name=basename, nprocs=nprocs, rerun='npt.trr', get_cmd=True)
@@ -230,6 +250,10 @@ class Target(Base):
 
                     if self.task.need_hvap_files:
                         npt.gmx.generate_top_for_hvap(top_diff, top_diff_hvap)
+
+                        # TODO LJ96 potential
+                        if Config.LJ96:
+                            npt.gmx.modify_lj96([], [top_diff_hvap], [], [basename + '-hvap.xvg'])
 
                         cmd = npt.gmx.grompp(mdp='diff.mdp', top=top_diff_hvap, tpr_out=basename + '-hvap.tpr',
                                              get_cmd=True)
@@ -272,13 +296,13 @@ class Target(Base):
 
         if not os.path.exists('init.msd'):
             smiles_list = self.smiles.split('.')
-            vacuum.set_system(smiles_list, n_atoms=3000, n_mol_list=[1] * len(smiles_list), density=None)
-            vacuum.length = 40
-            vacuum.build(export=False)
+            gas.set_system(smiles_list, n_atoms=3000, n_mol_list=[1] * len(smiles_list), density=None)
+            gas.length = 40
+            gas.build(export=False)
 
         cd_or_create_and_cd(self.dir_vacuum)
 
-        shutil.copy('../init.msd', vacuum.msd)
+        shutil.copy('../init.msd', gas.msd)
 
         ### temperature dependence
         ppf_run = 'run.ppf'
@@ -289,26 +313,26 @@ class Target(Base):
         delta_ppf(ppf_file, ppf_run, self.T, paras)
         ###
 
-        vacuum.export(ppf=ppf_run)
+        gas.export(ppf=ppf_run)
 
         # TODO dielectric
-        vacuum.gmx._DIELECTRIC = self.dielectric or 1
+        gas.gmx._DIELECTRIC = self.dielectric or 1
         # TODO Because of the float error in gmx edr file, MAKE SURE nst_edr equals nst_trr
-        commands = vacuum.prepare(T=self.T, jobname='NPT-%s-%i' % (self.name, self.T),
-                                  dt=0.002, nst_eq=int(2E5), nst_run=int(5E5), nst_edr=100, nst_trr=100, nst_xtc=0)
-                                  # dt=0.001, nst_eq=int(4E5), nst_run=int(10E5), nst_edr=500, nst_trr=500, nst_xtc=0)
+        commands = gas.prepare(T=self.T, jobname='NPT-%s-%i' % (self.name, self.T),
+                               dt=0.002, nst_eq=int(2E5), nst_run=int(5E5), nst_edr=100, nst_trr=100, nst_xtc=0)
+                               # dt=0.001, nst_eq=int(4E5), nst_run=int(10E5), nst_edr=200, nst_trr=200, nst_xtc=0)
 
         commands.insert(0, 'touch _started_')
 
         if paras_diff is not None:
-            vacuum.gmx.prepare_mdp_from_template('t_nvt.mdp', mdp_out='diff.mdp', nstxtcout=0, restart=True)
+            gas.gmx.prepare_mdp_from_template('t_nvt.mdp', mdp_out='diff.mdp', nstxtcout=0, restart=True)
             commands.append('export GMX_MAXCONSTRWARN=-1')
-            nprocs = vacuum.jobmanager.nprocs
+            nprocs = gas.jobmanager.nprocs
 
             import multiprocessing
             def worker(key, return_dict):
                 worker_commands = []
-                for i in [-1, 1]:
+                for i in [1]:
                     basename = 'diff%i.%s' % (i, key)
                     ppf_diff = basename + '.ppf'
                     msd_diff = basename + '.msd'
@@ -324,14 +348,14 @@ class Target(Base):
                     delta_ppf(ppf_file, ppf_diff, self.T, paras_delta)
                     ###
 
-                    shutil.copy(vacuum.msd, msd_diff)
+                    shutil.copy(gas.msd, msd_diff)
 
-                    vacuum.dff.set_charge([msd_diff], ppf_diff, dfi_name=basename)
-                    vacuum.dff.export_gmx(msd_diff, ppf_diff, gro_out=gro_diff, top_out=top_diff, dfi_name=basename)
+                    gas.dff.set_charge([msd_diff], ppf_diff, dfi_name=basename)
+                    gas.dff.export_gmx(msd_diff, ppf_diff, gro_out=gro_diff, top_out=top_diff, dfi_name=basename)
 
-                    cmd = vacuum.gmx.grompp(mdp='diff.mdp', top=top_diff, tpr_out=basename + '.tpr', get_cmd=True)
+                    cmd = gas.gmx.grompp(mdp='diff.mdp', top=top_diff, tpr_out=basename + '.tpr', get_cmd=True)
                     worker_commands.append(cmd)
-                    cmd = vacuum.gmx.mdrun(name=basename, nprocs=nprocs, n_omp=nprocs, rerun='nvt.trr', get_cmd=True)
+                    cmd = gas.gmx.mdrun(name=basename, nprocs=nprocs, n_omp=nprocs, rerun='nvt.trr', get_cmd=True)
                     worker_commands.append(cmd)
 
                     os.remove(ppf_diff)
@@ -358,7 +382,7 @@ class Target(Base):
         jobmanager.generate_sh(os.getcwd(), commands, name='VACUUM-%s-%i-%i' % (self.name, self.T, self.task.iteration))
 
         if jobmanager.ngpu == 0:
-            vacuum.run()
+            gas.run()
             commands = []
 
         return commands
@@ -417,15 +441,21 @@ class Target(Base):
             raise Exception('File not exist: ' + os.path.abspath('diff1.%s.edr' % k))
         pene_array_diff_p = np.array(df.Potential)
 
+        # try:
+        #     df = panedr.edr_to_df('diff-1.%s.edr' % k)
+        # except:
+        #     raise Exception('File not exist: ' + os.path.abspath('diff-1.%s.edr' % k))
+        # pene_array_diff_n = np.array(df.Potential)
         try:
-            df = panedr.edr_to_df('diff-1.%s.edr' % k)
+            df = panedr.edr_to_df('npt.edr')
         except:
-            raise Exception('File not exist: ' + os.path.abspath('diff-1.%s.edr' % k))
-        pene_array_diff_n = np.array(df.Potential)
+            raise Exception('File not exist: ' + os.path.abspath('npt.edr'))
+        pene_array = np.array(df.Potential)
 
         # calculate the derivative series dA/dp
         delta = get_delta_for_para(k)
-        dPene_array = (pene_array_diff_p - pene_array_diff_n) / delta / 2
+        # dPene_array = (pene_array_diff_p - pene_array_diff_n) / delta / 2
+        dPene_array = (pene_array_diff_p - pene_array) / delta
 
         # calculate the derivative dA/dp according to ForceBalance
         # TODO To accurately calculate the covariant, using dens_array.mean() instead of dens_series.mean()
@@ -464,15 +494,21 @@ class Target(Base):
             raise Exception('File not exist: ' + os.path.abspath('diff1.%s.edr' % k))
         pene_array_diff_p = np.array(df.Potential)
 
+        # try:
+        #     df = panedr.edr_to_df('diff-1.%s.edr' % k)
+        # except:
+        #     raise Exception('File not exist: ' + os.path.abspath('diff-1.%s.edr' % k))
+        # pene_array_diff_n = np.array(df.Potential)
         try:
-            df = panedr.edr_to_df('diff-1.%s.edr' % k)
+            df = panedr.edr_to_df('npt.edr')
         except:
-            raise Exception('File not exist: ' + os.path.abspath('diff-1.%s.edr' % k))
-        pene_array_diff_n = np.array(df.Potential)
+            raise Exception('File not exist: ' + os.path.abspath('npt.edr'))
+        pene_array = np.array(df.Potential)
 
         # calculate the derivative series dA/dp
         delta = get_delta_for_para(k)
-        dPene_array = (pene_array_diff_p - pene_array_diff_n) / delta / 2
+        # dPene_array = (pene_array_diff_p - pene_array_diff_n) / delta / 2
+        dPene_array = (pene_array_diff_p - pene_array) / delta
 
         if not self.need_vacuum:
             try:
@@ -481,13 +517,19 @@ class Target(Base):
                 raise Exception('File not exist: ' + os.path.abspath('diff1.%s-hvap.edr' % k))
             hvap_array_diff_p = self.RT - np.array(df.Potential) / self.n_mol
 
+            # try:
+            #     df = panedr.edr_to_df('diff-1.%s-hvap.edr' % k)
+            # except:
+            #     raise Exception('File not exist: ' + os.path.abspath('diff-1.%s-hvap.edr' % k))
+            # hvap_array_diff_n = self.RT - np.array(df.Potential) / self.n_mol
             try:
-                df = panedr.edr_to_df('diff-1.%s-hvap.edr' % k)
+                df = panedr.edr_to_df('hvap.edr')
             except:
-                raise Exception('File not exist: ' + os.path.abspath('diff-1.%s-hvap.edr' % k))
-            hvap_array_diff_n = self.RT - np.array(df.Potential) / self.n_mol
+                raise Exception('File not exist: ' + os.path.abspath('hvap.edr'))
+            hvap_array = self.RT - np.array(df.Potential) / self.n_mol
 
-            dHvap_array = (hvap_array_diff_p - hvap_array_diff_n) / delta / 2
+            # dHvap_array = (hvap_array_diff_p - hvap_array_diff_n) / delta / 2
+            dHvap_array = (hvap_array_diff_p - hvap_array) / delta
 
             dHdp = dHvap_array.mean() - 1 / self.RT * (
                     (self.hvap_array * dPene_array).mean() - self.hvap_array.mean() * dPene_array.mean())
@@ -503,12 +545,19 @@ class Target(Base):
                 raise Exception('File not exist: ' + os.path.abspath('diff1.%s.edr' % k))
             pene_array_diff_p = np.array(df.Potential)
 
+            # try:
+            #     df = panedr.edr_to_df('diff-1.%s.edr' % k)
+            # except:
+            #     raise Exception('File not exist: ' + os.path.abspath('diff-1.%s.edr' % k))
+            # pene_array_diff_n = np.array(df.Potential)
             try:
-                df = panedr.edr_to_df('diff-1.%s.edr' % k)
+                df = panedr.edr_to_df('nvt.edr')
             except:
-                raise Exception('File not exist: ' + os.path.abspath('diff-1.%s.edr' % k))
-            pene_array_diff_n = np.array(df.Potential)
-            dPene_array = (pene_array_diff_p - pene_array_diff_n) / delta / 2
+                raise Exception('File not exist: ' + os.path.abspath('nvt.edr' % k))
+            pene_array = np.array(df.Potential)
+
+            # dPene_array = (pene_array_diff_p - pene_array_diff_n) / delta / 2
+            dPene_array = (pene_array_diff_p - pene_array) / delta
 
             dEGASdp = dPene_array.mean() - 1 / self.RT * (
                     (self.pe_gas_array * dPene_array).mean() - self.pe_gas_array.mean() * dPene_array.mean())
