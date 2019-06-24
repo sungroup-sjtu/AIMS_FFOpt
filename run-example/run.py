@@ -50,24 +50,20 @@ if __name__ == '__main__':
             # ('c_4, c_4, c_4, c_4', 2, 0.1),
         ]
 
-        # temperature dependent LJ parameters
+        # Default temperature dependent LJ parameters \lambda. These are fixed during optimization
         optimizer.drde_dict = {
-            'h_1_dr': -0.01,
-            'h_1_de': 0.045,
-            'c_4_dl': 0.020,
-            'o_2_d2': 0.027,
+            'h_1_dl': 0.014, # The unit for \lambda is 10^-2 /K
         }
 
         optimizer.optimize(task_name=sys.argv[2],
                            torsions=torsions,
                            modify_torsions=modify_torsions,
-                           #weight_expansivity=0.01,
+                           # weight_expansivity=0.01, # optimize parameters against thermal expansion also
                            penalty_sigma=2,
                            penalty_epsilon=0.4,
                            penalty_charge=0,
                            drde_atoms={
-                               # 'all_dr': -0.01,
-                               # 'all_de': 0.056
+                               'c_4_dl': 0.014,  # temperature dependent LJ parameters \lambda to be optimized
                            })
 
     else:

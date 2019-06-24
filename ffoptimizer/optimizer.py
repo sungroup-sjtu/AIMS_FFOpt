@@ -184,7 +184,7 @@ class Optimizer():
 
             # TODO Fit several torsions one by one
             if torsions is not None and len(torsions) > 0:
-                from .config import Config
+                from config import Config
                 print('Fit torsion based on new non-bonded parameters')
                 for n, torsion in enumerate(torsions):
                     print(torsion)
