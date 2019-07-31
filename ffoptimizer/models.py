@@ -27,7 +27,7 @@ sys.path.append(Config.MS_TOOLS_DIR)
 from mstools.utils import cd_or_create_and_cd
 from mstools.jobmanager import Torque, Slurm
 from mstools.simulation.gmx import Npt, NvtGas
-from mstools.wrapper.ppf import delta_ppf
+from mstools.wrapper.ppf import delta_ppf, PPF
 
 if Config.JOB_MANAGER == 'slurm':
     PBS = Slurm
