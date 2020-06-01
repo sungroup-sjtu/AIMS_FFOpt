@@ -41,29 +41,36 @@ if __name__ == '__main__':
 
         # torsion parameters to be optimized
         torsions = [
-            ('C2-MP2.qmd', 'C2.msd', 'TORS H5 C1 C2 H6 500.0 60.0 15.0 12', 'h_1, c_4, c_4, h_1'),
-            ('C6-MP2.qmd', 'C6.msd', 'TORS C5 C8 C11 C14 500.0 180.0 10.0 18', 'c_4, c_4, c_4, c_4'),
         ]
 
         # torsion parameters to be modified
         modify_torsions = [
-            # ('c_4, c_4, c_4, c_4', 2, 0.1),
         ]
 
-        # Default temperature dependent LJ parameters \lambda. These are fixed during optimization
+        # default temperature dependent LJ parameters \lambda. These are fixed during optimization
+        # the unit for \lambda is 10^-2 /K
         optimizer.drde_dict = {
-            'h_1_dl': 0.014, # The unit for \lambda is 10^-2 /K
+            'h_1_dl': 0.014,
+
+            'c_4_dl': 0.014,
+            'c_3_dl': 0.005,
+
+            'n_3_dl': 0.014,
+            'n_2_dl': 0.005,
+
+            'o_2_dl': 0.014,
+            'o_1_dl': 0.005,
         }
 
         optimizer.optimize(task_name=sys.argv[2],
                            torsions=torsions,
                            modify_torsions=modify_torsions,
-                           # weight_expansivity=0.01, # optimize parameters against thermal expansion also
                            penalty_sigma=2,
                            penalty_epsilon=0.4,
                            penalty_charge=0,
                            drde_atoms={
-                               'c_4_dl': 0.014,  # temperature dependent LJ parameters \lambda to be optimized
+                               # temperature dependent LJ parameters \lambda to be optimized
+                               'h_1_dl': 0.014,
                            })
 
     else:

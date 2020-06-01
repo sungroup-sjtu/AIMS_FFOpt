@@ -7,7 +7,7 @@ c_4h3                :	c_4h3	c_4h3	c_4	c_4	c_4	c_4	c_4	c_4	c_4	c_4: V 1.0, S TEA
 h_1                  :	h_1	h_1	h_1	h_1	h_1	h_1	h_1	h_1	h_1	h_1: V 1.0, S TEAM_LS, C D, R R1
 #DFF:PPF
 #PROTOCOL = AMBER
-#TYPINGRULE = C:\Users\zheng\Projects\DFF\Developing\database\TEAMFF.ref\TEAM_LS\TEAM_LS.ext
+#TYPINGRULE =
 ATYPE: c_4:    6.00000*,  12.01100*: V 1.0, S TEAM_LS, C D, R R1
 ATYPE: c_4h:    6.00000*,  12.01100*: V 1.36, S TEAM_LS, C D, R R1
 ATYPE: c_4h2:    6.00000*,  12.01100*: V 1.0, S TEAM_LS, C D, R R1
@@ -31,6 +31,6 @@ BHARM: c_4, h_1:    1.09670*, 360.27960*: V 1.0, S TEAM_LS, C D, R R1
 AHARM: c_4, c_4, c_4:  113.17930*,  62.26830*: V 1.52, S TEAM_LS, C D, R R9
 AHARM: c_4, c_4, h_1:  110.13190*,  45.54020*: V 1.0, S TEAM_LS, C D, R R1
 AHARM: h_1, c_4, h_1:  106.67940*,  35.64690*: V 1.0, S TEAM_LS, C D, R R1
-TCOSP: c_4, c_4, c_4, c_4:    0.00000*,   0.0024,   3.00000*,   0.00000*,  -0.49900,   1.00000*, 180.00000*,   0.02490,   2.00000*:
+TCOSP: c_4, c_4, c_4, c_4:    0.00000*,   0.00240*,   3.00000*,   0.00000*,  -0.49900*,   1.00000*, 180.00000*,   0.02490*,   2.00000*: V 1.0, S TEAM_LS, C D, R R1
 TCOSP: c_4, c_4, c_4, h_1:    0.00000*,   0.18810*,   3.00000*,   0.00000*,  -0.25200*,   1.00000*, 180.00000*,   0.17800*,   2.00000*: V 1.0, S TEAM_LS, C D, R R1
 TCOSP: h_1, c_4, c_4, h_1:    0.00000*,   0.14880*,   3.00000*,   0.00000*,   0.15500*,   1.00000*, 180.00000*,   0.25520*,   2.00000*: V 1.0, S TEAM_LS, C D, R R1
